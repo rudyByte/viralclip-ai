@@ -56,6 +56,15 @@ export default function Dashboard() {
     }
   }
 
+  const getQueuePosition = (job) => {
+    if (job.status !== 'queued') return 0
+    const queuedJobs = [...jobs]
+      .filter(j => j.status === 'queued')
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    const index = queuedJobs.findIndex(j => j.id === job.id)
+    return index !== -1 ? index + 1 : 1
+  }
+
   // Calculate statistics
   const totalVideos = jobs.length
   const activeJobs = jobs.filter(j => !['done', 'error'].includes(j.status)).length
@@ -242,7 +251,9 @@ export default function Dashboard() {
                       <div className="space-y-1 mt-2">
                         <div className="flex items-center justify-between text-[10px]">
                           <span className="text-brand-400 capitalize animate-pulse font-medium">
-                            {job.current_step || job.status}...
+                            {job.status === 'queued' 
+                              ? `Queued (Pos #${getQueuePosition(job)})` 
+                              : `${job.current_step || job.status}...`}
                           </span>
                           <span className="text-slate-400">{job.progress}%</span>
                         </div>
@@ -261,6 +272,11 @@ export default function Dashboard() {
                     {job.status === 'done' && (
                       <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
                         Ready
+                      </span>
+                    )}
+                    {job.status === 'queued' && (
+                      <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
+                        Queued
                       </span>
                     )}
                     {job.status === 'error' && (

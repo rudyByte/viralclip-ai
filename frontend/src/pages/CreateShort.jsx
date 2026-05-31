@@ -36,12 +36,17 @@ export default function CreateShort() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!url) return toast.error('Please enter a YouTube URL')
+    if (!url) return toast.error('Please enter at least one YouTube URL')
     
+    const urls = url.split(/[\n,]+/).map(u => u.trim()).filter(Boolean)
+    if (urls.length === 0) return toast.error('Please enter at least one YouTube URL')
+
     // Simple YouTube URL Regex check
     const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/
-    if (!ytRegex.test(url)) {
-      return toast.error('Please enter a valid YouTube video URL')
+    for (const u of urls) {
+      if (!ytRegex.test(u)) {
+        return toast.error(`Invalid YouTube URL: "${u}"`)
+      }
     }
 
     if (minDuration >= maxDuration) {
@@ -51,7 +56,7 @@ export default function CreateShort() {
     setSubmitting(true)
     try {
       const response = await processVideo({
-        youtube_url: url,
+        youtube_url: urls.join(','),
         clip_min_duration: parseInt(minDuration),
         clip_max_duration: parseInt(maxDuration),
         num_clips: parseInt(numClips),
@@ -59,7 +64,8 @@ export default function CreateShort() {
         background_type: backgroundType
       })
       
-      toast.success('Job queued successfully!')
+      toast.success(response.message || 'Job(s) queued successfully!')
+      // Redirect to the first job's results page
       navigate(`/results/${response.job_id}`)
     } catch (err) {
       console.error(err)
@@ -101,20 +107,25 @@ export default function CreateShort() {
         
         {/* Step 1: Input URL */}
         <div className="glass rounded-2xl p-6 space-y-4">
-          <label className="block text-sm font-bold text-white uppercase tracking-wider">
-            1. Paste YouTube URL
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-bold text-white uppercase tracking-wider">
+              1. Paste YouTube URL(s)
+            </label>
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+              Separate multiple links with commas or newlines
+            </span>
+          </div>
           <div className="relative">
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-500">
+            <div className="absolute left-4 top-5 text-pink-500">
               <Youtube className="w-6 h-6" />
             </div>
-            <input
-              type="text"
-              placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            <textarea
+              placeholder="e.g.&#10;https://www.youtube.com/watch?v=dQw4w9WgXcQ&#10;https://www.youtube.com/watch?v=another_video_url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               disabled={submitting}
-              className="w-full pl-12 pr-4 py-4 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-medium text-base"
+              rows={4}
+              className="w-full pl-12 pr-4 py-3 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-medium text-base font-mono resize-y"
             />
           </div>
         </div>

@@ -73,52 +73,40 @@ def job_to_response(job: Job, clip_count: int = 0) -> JobResponse:
 @router.post("/process")
 async def process_video(
     req: ProcessRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    """Start the full ViralClip AI processing pipeline."""
-    if len(_running_jobs) >= settings.max_concurrent_jobs:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Max concurrent jobs ({settings.max_concurrent_jobs}) reached. Please wait."
+    """Start the full ViralClip AI processing pipeline (supports single or comma/newline separated list of URLs)."""
+    urls = [u.strip() for u in req.youtube_url.replace("\n", ",").split(",") if u.strip()]
+    if not urls:
+        raise HTTPException(status_code=400, detail="No valid YouTube URLs provided")
+
+    job_ids = []
+    for url in urls:
+        job_id = str(uuid.uuid4())
+        job = Job(
+            id=job_id,
+            youtube_url=url,
+            status="queued",
+            progress=0,
+            clip_min_duration=req.clip_min_duration,
+            clip_max_duration=req.clip_max_duration,
+            num_clips=req.num_clips,
+            caption_style=req.caption_style,
+            background_type=req.background_type,
+            created_at=datetime.utcnow(),
         )
+        db.add(job)
+        job_ids.append(job_id)
 
-    job_id = str(uuid.uuid4())
-    job = Job(
-        id=job_id,
-        youtube_url=req.youtube_url,
-        status="queued",
-        progress=0,
-        clip_min_duration=req.clip_min_duration,
-        clip_max_duration=req.clip_max_duration,
-        num_clips=req.num_clips,
-        caption_style=req.caption_style,
-        background_type=req.background_type,
-        created_at=datetime.utcnow(),
-    )
-    db.add(job)
     await db.commit()
-
-    # Launch pipeline in background
-    async def _run():
-        _running_jobs.add(job_id)
-        try:
-            await run_pipeline(
-                job_id=job_id,
-                youtube_url=req.youtube_url,
-                clip_min_duration=req.clip_min_duration,
-                clip_max_duration=req.clip_max_duration,
-                num_clips=req.num_clips,
-                caption_style=req.caption_style,
-                background_type=req.background_type,
-            )
-        finally:
-            _running_jobs.discard(job_id)
-
-    background_tasks.add_task(_run)
-
-    logger.info(f"Job queued: {job_id}")
-    return {"job_id": job_id, "status": "queued", "message": "Pipeline started"}
+    logger.info(f"Queued {len(job_ids)} jobs: {job_ids}")
+    
+    return {
+        "job_id": job_ids[0],  # Backwards compatibility for single URL redirect
+        "job_ids": job_ids,
+        "status": "queued",
+        "message": f"Successfully queued {len(job_ids)} video clip jobs."
+    }
 
 
 @router.get("/status/{job_id}")
@@ -170,7 +158,7 @@ async def delete_job(job_id: str, db: AsyncSession = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if job_id in _running_jobs:
+    if job.status in ["downloading", "transcribing", "analyzing", "clipping"]:
         raise HTTPException(status_code=409, detail="Cannot delete a running job")
 
     await db.execute(delete(Hook).where(Hook.job_id == job_id))
