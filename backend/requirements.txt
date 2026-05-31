@@ -11,7 +11,7 @@ sqlalchemy==2.0.35
 aiosqlite==0.20.0
 
 # Video Downloading
-yt-dlp==2024.10.7
+yt-dlp
 
 # Speech Recognition
 faster-whisper==1.0.3
