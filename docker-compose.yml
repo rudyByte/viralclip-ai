@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: viralclip-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-data:/app/data
+      - backend-temp:/app/temp
+      - backend-exports:/app/exports
+      - backend-assets:/app/assets
+      - backend-models:/app/models
+    env_file:
+      - ./backend/.env
+    environment:
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/viralclip.db
+      - TEMP_DIR=/app/temp
+      - EXPORT_DIR=/app/exports
+      - ASSETS_DIR=/app/assets
+      - MODELS_DIR=/app/models
+      - FRONTEND_URL=http://localhost:3000
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: viralclip-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:
+  backend-temp:
+  backend-exports:
+  backend-assets:
+  backend-models:

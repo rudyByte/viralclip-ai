@@ -1,9 +1,8 @@
-"""
-ViralClip AI — FastAPI Main Application
-"""
 import logging
 import asyncio
+import shutil
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +24,7 @@ settings = get_settings()
 
 # ── Queue Worker ──────────────────────────────────────────────────────────────
 worker_task: asyncio.Task = None
+cleanup_task: asyncio.Task = None
 
 async def queue_worker_loop():
     logger.info("Persistent queue worker loop started.")
@@ -88,10 +88,43 @@ async def queue_worker_loop():
         logger.error(f"Error in queue worker loop: {e}", exc_info=True)
 
 
+async def temp_cleanup_loop():
+    logger.info("Automatic temp files cleanup scheduler started.")
+    try:
+        while True:
+            temp_path = Path(settings.temp_dir)
+            if temp_path.exists() and temp_path.is_dir():
+                now = datetime.now()
+                cutoff = now - timedelta(hours=24)
+                logger.info(f"Running scheduled temp cleanup. Cutoff time: {cutoff}")
+                
+                cleaned_count = 0
+                for item in temp_path.iterdir():
+                    try:
+                        mtime = datetime.fromtimestamp(item.stat().st_mtime)
+                        if mtime < cutoff:
+                            if item.is_dir():
+                                shutil.rmtree(item)
+                            else:
+                                item.unlink()
+                            cleaned_count += 1
+                    except Exception as item_err:
+                        logger.error(f"Failed to delete {item}: {item_err}")
+                if cleaned_count > 0:
+                    logger.info(f"Cleaned up {cleaned_count} temp items.")
+            
+            # Wait for 1 hour
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        logger.info("Temp cleanup scheduler loop cancelled.")
+    except Exception as e:
+        logger.error(f"Error in temp cleanup scheduler loop: {e}", exc_info=True)
+
+
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global worker_task
+    global worker_task, cleanup_task
     logger.info("ViralClip AI starting up...")
     settings.ensure_dirs()
     await init_db()
@@ -101,15 +134,23 @@ async def lifespan(app: FastAPI):
     logger.info(f"Groq model: llama-3.3-70b-versatile")
     logger.info(f"Whisper model: {settings.whisper_model}")
     
-    # Start persistent queue worker
+    # Start background tasks
     worker_task = asyncio.create_task(queue_worker_loop())
+    cleanup_task = asyncio.create_task(temp_cleanup_loop())
     
     yield
     
-    # Stop persistent queue worker
+    # Stop background tasks
+    tasks_to_cancel = []
     if worker_task:
         worker_task.cancel()
-        await asyncio.gather(worker_task, return_exceptions=True)
+        tasks_to_cancel.append(worker_task)
+    if cleanup_task:
+        cleanup_task.cancel()
+        tasks_to_cancel.append(cleanup_task)
+        
+    if tasks_to_cancel:
+        await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
     logger.info("ViralClip AI shutting down...")
 
 
