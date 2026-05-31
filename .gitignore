@@ -33,6 +33,12 @@ temp/
 exports/
 models/
 
+# Gameplay assets - exclude large video files but keep folder structure
+assets/gameplay/**/*.mp4
+assets/gameplay/**/*.mov
+assets/gameplay/**/*.avi
+assets/gameplay/**/*.mkv
+
 # Python caching & Virtual Environments
 __pycache__/
 *.py[cod]

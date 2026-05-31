@@ -13,7 +13,7 @@ services:
       - backend-data:/app/data
       - backend-temp:/app/temp
       - backend-exports:/app/exports
-      - backend-assets:/app/assets
+      - ./assets:/app/assets
       - backend-models:/app/models
     env_file:
       - ./backend/.env
@@ -42,5 +42,4 @@ volumes:
   backend-data:
   backend-temp:
   backend-exports:
-  backend-assets:
   backend-models:
