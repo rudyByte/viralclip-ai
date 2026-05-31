@@ -1,0 +1,265 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import { 
+  Youtube, Sliders, Type, Gamepad2, Play, Sparkles, 
+  ChevronRight, ArrowLeft, Loader2 
+} from 'lucide-react'
+import { processVideo } from '@/lib/api'
+import toast from 'react-hot-toast'
+
+const CAPTION_STYLES = [
+  { id: 'hormozi', name: 'Alex Hormozi', desc: 'Bold yellow/green uppercase words with emoji hooks.', badge: 'Popular' },
+  { id: 'gadzhi', name: 'Iman Gadzhi', desc: 'Elegant, serif typeface captions with subtle fade-ins.', badge: 'Sleek' },
+  { id: 'ali_abdaal', name: 'Ali Abdaal', desc: 'Minimalist clean san-serif text, easy-to-read.', badge: 'Clean' },
+  { id: 'mrbeast', name: 'MrBeast Style', desc: 'High-energy, colorful scaling text with thick borders.', badge: 'Dynamic' },
+  { id: 'minimal', name: 'Minimalist', desc: 'Classic white subtitles, centered, no distractions.', badge: 'Subtle' },
+]
+
+const BACKGROUND_TYPES = [
+  { id: 'subway', name: 'Subway Surfers', desc: 'Infinite running gameplay, perfect for high retention.', image: '🏄‍♂️' },
+  { id: 'minecraft', name: 'Minecraft Parkour', desc: 'Relaxing block-jumping gameplay, widely engaging.', image: '🧱' },
+  { id: 'gta', name: 'GTA V Chaos', desc: 'Stunt tracks and high speed crashes from Los Santos.', image: '🚗' },
+  { id: 'templerun', name: 'Temple Run', desc: 'Classic temple escapes, keeps viewers glued to screen.', image: '🏃‍♂️' },
+  { id: 'none', name: 'No Gameplay Overlay', desc: 'Keep original video crop centered without gaming overlay.', image: '❌' },
+]
+
+export default function CreateShort() {
+  const navigate = useNavigate()
+  const [url, setUrl] = useState('')
+  const [minDuration, setMinDuration] = useState(30)
+  const [maxDuration, setMaxDuration] = useState(60)
+  const [numClips, setNumClips] = useState(5)
+  const [captionStyle, setCaptionStyle] = useState('hormozi')
+  const [backgroundType, setBackgroundType] = useState('subway')
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!url) return toast.error('Please enter a YouTube URL')
+    
+    // Simple YouTube URL Regex check
+    const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/
+    if (!ytRegex.test(url)) {
+      return toast.error('Please enter a valid YouTube video URL')
+    }
+
+    if (minDuration >= maxDuration) {
+      return toast.error('Minimum duration must be less than maximum duration')
+    }
+
+    setSubmitting(true)
+    try {
+      const response = await processVideo({
+        youtube_url: url,
+        clip_min_duration: parseInt(minDuration),
+        clip_max_duration: parseInt(maxDuration),
+        num_clips: parseInt(numClips),
+        caption_style: captionStyle,
+        background_type: backgroundType
+      })
+      
+      toast.success('Job queued successfully!')
+      navigate(`/results/${response.job_id}`)
+    } catch (err) {
+      console.error(err)
+      toast.error(err.response?.data?.detail || 'Failed to start video processing')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -15 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+      className="p-8 max-w-4xl mx-auto space-y-8"
+    >
+      {/* Back link */}
+      <button
+        onClick={() => navigate('/')}
+        className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors group text-sm"
+      >
+        <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+        <span>Back to Dashboard</span>
+      </button>
+
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-extrabold text-white flex items-center gap-2">
+          <Sparkles className="w-8 h-8 text-brand-400" />
+          <span>Create Viral Short</span>
+        </h1>
+        <p className="text-slate-400 mt-1">
+          Configure your pipeline settings and let LLaMA + Whisper perform their magic.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-8">
+        
+        {/* Step 1: Input URL */}
+        <div className="glass rounded-2xl p-6 space-y-4">
+          <label className="block text-sm font-bold text-white uppercase tracking-wider">
+            1. Paste YouTube URL
+          </label>
+          <div className="relative">
+            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-500">
+              <Youtube className="w-6 h-6" />
+            </div>
+            <input
+              type="text"
+              placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              disabled={submitting}
+              className="w-full pl-12 pr-4 py-4 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-medium text-base"
+            />
+          </div>
+        </div>
+
+        {/* Step 2: Duration and Clip count */}
+        <div className="glass rounded-2xl p-6 space-y-6">
+          <div className="flex items-center gap-2 text-sm font-bold text-white uppercase tracking-wider">
+            <Sliders className="w-5 h-5 text-brand-400" />
+            <span>2. Video Settings</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                Min Duration ({minDuration}s)
+              </label>
+              <input
+                type="range"
+                min="15"
+                max="60"
+                step="5"
+                value={minDuration}
+                onChange={(e) => setMinDuration(e.target.value)}
+                disabled={submitting}
+                className="w-full accent-brand-500 bg-surface-900 rounded-lg cursor-pointer h-2"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                Max Duration ({maxDuration}s)
+              </label>
+              <input
+                type="range"
+                min="30"
+                max="90"
+                step="5"
+                value={maxDuration}
+                onChange={(e) => setMaxDuration(e.target.value)}
+                disabled={submitting}
+                className="w-full accent-brand-500 bg-surface-900 rounded-lg cursor-pointer h-2"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                Max Clips ({numClips})
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={numClips}
+                onChange={(e) => setNumClips(e.target.value)}
+                disabled={submitting}
+                className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition-all font-semibold"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Step 3: Captions */}
+        <div className="glass rounded-2xl p-6 space-y-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-white uppercase tracking-wider">
+            <Type className="w-5 h-5 text-brand-400" />
+            <span>3. Subtitle Font & Animation Style</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {CAPTION_STYLES.map(style => (
+              <div
+                key={style.id}
+                onClick={() => !submitting && setCaptionStyle(style.id)}
+                className={`p-4 rounded-xl border cursor-pointer flex flex-col justify-between h-32 transition-all ${
+                  captionStyle === style.id
+                    ? 'bg-brand-600/10 border-brand-500 shadow-[0_0_15px_rgba(99,102,241,0.15)]'
+                    : 'bg-surface-900/50 border-white/[0.06] hover:border-white/20'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-white text-sm">{style.name}</h4>
+                    <span className="text-[10px] uppercase font-bold bg-white/10 px-2 py-0.5 rounded-full text-brand-400">
+                      {style.badge}
+                    </span>
+                  </div>
+                  <p className="text-slate-400 text-xs mt-2 leading-relaxed">{style.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Step 4: Backgrounds */}
+        <div className="glass rounded-2xl p-6 space-y-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-white uppercase tracking-wider">
+            <Gamepad2 className="w-5 h-5 text-brand-400" />
+            <span>4. Gaming Background Overlay</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {BACKGROUND_TYPES.map(bg => (
+              <div
+                key={bg.id}
+                onClick={() => !submitting && setBackgroundType(bg.id)}
+                className={`p-4 rounded-xl border cursor-pointer flex items-center gap-4 transition-all ${
+                  backgroundType === bg.id
+                    ? 'bg-brand-600/10 border-brand-500 shadow-[0_0_15px_rgba(99,102,241,0.15)]'
+                    : 'bg-surface-900/50 border-white/[0.06] hover:border-white/20'
+                }`}
+              >
+                <div className="w-12 h-12 rounded-xl bg-surface-900 flex items-center justify-center text-2xl border border-white/10">
+                  {bg.image}
+                </div>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-white text-sm truncate">{bg.name}</h4>
+                  <p className="text-slate-400 text-xs truncate leading-normal mt-0.5">{bg.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Submit */}
+        <div className="flex items-center justify-end">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="btn-primary px-8 py-4 flex items-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Queueing Clip Job...</span>
+              </>
+            ) : (
+              <>
+                <span>Generate Clips</span>
+                <Play className="w-4 h-4" fill="currentColor" />
+              </>
+            )}
+          </button>
+        </div>
+
+      </form>
+    </motion.div>
+  )
+}
