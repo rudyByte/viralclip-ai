@@ -139,5 +139,5 @@ class FaceTracker:
         return (x, y)
 
     async def analyze_video_async(self, *args, **kwargs):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.analyze_video(*args, **kwargs))

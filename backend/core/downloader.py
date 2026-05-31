@@ -105,7 +105,7 @@ class Downloader:
         progress_callback: Optional[Callable] = None,
     ) -> tuple[str, str]:
         """Async wrapper for download_video."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             lambda: self.download_video(url, job_id, progress_callback)
@@ -113,5 +113,5 @@ class Downloader:
 
     async def get_video_info_async(self, url: str) -> VideoInfo:
         """Async wrapper for get_video_info."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.get_video_info(url))

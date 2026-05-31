@@ -79,10 +79,12 @@ async def run_pipeline(
             )
             await db.commit()
 
+        loop = asyncio.get_running_loop()
+
         def dl_progress(pct):
             asyncio.run_coroutine_threadsafe(
                 update_job_status(job_id, "downloading", 5 + int(pct * 0.15), f"Downloading... {pct}%"),
-                asyncio.get_event_loop(),
+                loop,
             )
 
         video_path, audio_path = await downloader.download_video_async(

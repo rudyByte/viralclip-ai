@@ -223,7 +223,7 @@ class Transcriber:
         progress_callback: Optional[Callable] = None,
     ) -> Transcript:
         """Async wrapper for transcribe."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             lambda: self.transcribe(audio_path, progress_callback)

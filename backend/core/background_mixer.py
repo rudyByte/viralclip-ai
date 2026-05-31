@@ -188,5 +188,5 @@ class BackgroundMixer:
             return 60.0
 
     async def mix_with_background_async(self, *args, **kwargs) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.mix_with_background(*args, **kwargs))

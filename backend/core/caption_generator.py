@@ -241,9 +241,9 @@ Style: Default,{style.font_name},{style.font_size},{style.primary_color},{style.
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
     async def generate_ass_file_async(self, *args, **kwargs) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.generate_ass_file(*args, **kwargs))
 
     async def burn_captions_async(self, *args, **kwargs) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.burn_captions(*args, **kwargs))

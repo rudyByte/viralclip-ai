@@ -165,9 +165,9 @@ class Clipper:
             raise RuntimeError(f"FFmpeg error:\n{result.stderr[-1000:]}")
 
     async def extract_clip_async(self, *args, **kwargs) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.extract_clip(*args, **kwargs))
 
     async def crop_to_vertical_async(self, *args, **kwargs) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.crop_to_vertical_smart(*args, **kwargs))
