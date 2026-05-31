@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = Field(2, env="MAX_CONCURRENT_JOBS")
 
     # Whisper
-    whisper_model: str = Field("large-v3-turbo", env="WHISPER_MODEL")
+    whisper_model: str = Field("large-v3", env="WHISPER_MODEL")
     whisper_device: str = Field("auto", env="WHISPER_DEVICE")
     whisper_compute_type: str = Field("float16", env="WHISPER_COMPUTE_TYPE")
 
