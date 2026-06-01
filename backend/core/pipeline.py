@@ -1,6 +1,7 @@
 """
 ViralClip AI — Pipeline Orchestrator
 Coordinates the full processing pipeline for a single job.
+Supports checkpoint-based resume at every phase.
 """
 import asyncio
 import logging
@@ -9,13 +10,13 @@ import json
 import uuid
 from pathlib import Path
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Optional
 
 from config import get_settings
 from database import AsyncSessionLocal, Job, Clip, Hook
 from core.downloader import Downloader
 from core.transcriber import Transcriber
-from core.analyzer import GroqAnalyzer
+from core.analyzer import GroqAnalyzer, ViralMoment
 from core.clipper import Clipper
 from core.caption_generator import CaptionGenerator
 from core.background_mixer import BackgroundMixer
@@ -29,7 +30,7 @@ settings = get_settings()
 async def update_job_status(job_id: str, status: str, progress: int, step: str = "", error: str = ""):
     """Update job status in database."""
     async with AsyncSessionLocal() as db:
-        from sqlalchemy import select, update
+        from sqlalchemy import update
         await db.execute(
             update(Job)
             .where(Job.id == job_id)
@@ -44,6 +45,14 @@ async def update_job_status(job_id: str, status: str, progress: int, step: str =
         await db.commit()
 
 
+async def _get_job(job_id: str) -> Optional[Job]:
+    """Fetch the latest job record from DB."""
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select
+        result = await db.execute(select(Job).where(Job.id == job_id))
+        return result.scalars().first()
+
+
 async def run_pipeline(
     job_id: str,
     youtube_url: str,
@@ -53,87 +62,163 @@ async def run_pipeline(
     caption_style: str = "hormozi",
     background_type: str = "subway",
 ):
-    """Full ViralClip AI processing pipeline."""
+    """
+    Full ViralClip AI processing pipeline with checkpoint-based resume.
+
+    Phases:
+      1. Download  — skipped if video_path + audio_path files already exist
+      2. Transcribe — skipped if transcript.json already saved on disk
+      3. Analyze   — skipped if viral_moments.json already saved on disk
+      4. Clip      — per-clip resume: skips clips whose DB record is 'done' and export file exists
+    """
     temp_dir = Path(settings.temp_dir) / job_id
     temp_dir.mkdir(parents=True, exist_ok=True)
     export_dir = Path(settings.export_dir) / job_id
     export_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        # ── Load existing job record for checkpoint data ───────────────
+        job = await _get_job(job_id)
+
         # ── Step 1: Download ──────────────────────────────────────────
-        await update_job_status(job_id, "downloading", 5, "Downloading video...")
-        logger.info(f"[{job_id}] Downloading: {youtube_url}")
+        video_path = job.video_path if job else None
+        audio_path = job.audio_path if job else None
 
-        downloader = Downloader(str(temp_dir))
-        info = await downloader.get_video_info_async(youtube_url)
+        if video_path and audio_path and os.path.exists(video_path) and os.path.exists(audio_path):
+            logger.info(f"[{job_id}] ✓ Step 1 checkpoint: video/audio already on disk, skipping download.")
+            await update_job_status(job_id, "downloading", 20, "Video already downloaded, resuming...")
+            yt_title = job.title or "YouTube Video"
+        else:
+            await update_job_status(job_id, "downloading", 5, "Downloading video...")
+            logger.info(f"[{job_id}] Step 1: Downloading {youtube_url}")
 
-        async with AsyncSessionLocal() as db:
-            from sqlalchemy import update as sq_update
-            await db.execute(
-                sq_update(Job).where(Job.id == job_id).values(
-                    title=info.title,
-                    channel=info.channel,
-                    thumbnail_url=info.thumbnail,
-                    duration_seconds=info.duration,
+            downloader = Downloader(str(temp_dir))
+            info = await downloader.get_video_info_async(youtube_url)
+            yt_title = info.title
+
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import update as sq_update
+                await db.execute(
+                    sq_update(Job).where(Job.id == job_id).values(
+                        title=info.title,
+                        channel=info.channel,
+                        thumbnail_url=info.thumbnail,
+                        duration_seconds=info.duration,
+                    )
                 )
-            )
-            await db.commit()
+                await db.commit()
 
-        loop = asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
 
-        def dl_progress(pct):
-            asyncio.run_coroutine_threadsafe(
-                update_job_status(job_id, "downloading", 5 + int(pct * 0.15), f"Downloading... {pct}%"),
-                loop,
-            )
-
-        video_path, audio_path = await downloader.download_video_async(
-            youtube_url, job_id, progress_callback=dl_progress
-        )
-
-        async with AsyncSessionLocal() as db:
-            from sqlalchemy import update as sq_update
-            await db.execute(
-                sq_update(Job).where(Job.id == job_id).values(
-                    video_path=video_path, audio_path=audio_path
+            def dl_progress(pct):
+                asyncio.run_coroutine_threadsafe(
+                    update_job_status(job_id, "downloading", 5 + int(pct * 0.15), f"Downloading... {pct}%"),
+                    loop,
                 )
+
+            video_path, audio_path = await downloader.download_video_async(
+                youtube_url, job_id, progress_callback=dl_progress
             )
-            await db.commit()
+
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import update as sq_update
+                await db.execute(
+                    sq_update(Job).where(Job.id == job_id).values(
+                        video_path=video_path, audio_path=audio_path
+                    )
+                )
+                await db.commit()
 
         # ── Step 2: Transcribe ────────────────────────────────────────
-        await update_job_status(job_id, "transcribing", 22, "Transcribing audio with Whisper...")
-        logger.info(f"[{job_id}] Transcribing...")
+        transcript_path = job.transcript_path if job else None
+        cached_transcript = temp_dir / "transcript.json"
 
-        transcriber = Transcriber(
-            model_name=settings.whisper_model,
-            device=settings.whisper_device,
-            compute_type=settings.whisper_compute_type,
-        )
-        transcript = await transcriber.transcribe_async(audio_path)
+        if (transcript_path and os.path.exists(transcript_path)) or cached_transcript.exists():
+            load_path = transcript_path if (transcript_path and os.path.exists(transcript_path)) else str(cached_transcript)
+            logger.info(f"[{job_id}] ✓ Step 2 checkpoint: transcript found at {load_path}, skipping Whisper.")
+            await update_job_status(job_id, "transcribing", 44, "Transcript already available, resuming...")
+            transcript = Transcriber.load_transcript(load_path)
+        else:
+            await update_job_status(job_id, "transcribing", 22, "Transcribing audio with Whisper...")
+            logger.info(f"[{job_id}] Step 2: Transcribing with Whisper...")
 
-        transcript_path = str(temp_dir / "transcript.json")
-        transcriber.save_transcript(transcript, transcript_path)
+            loop = asyncio.get_running_loop()
 
-        async with AsyncSessionLocal() as db:
-            from sqlalchemy import update as sq_update
-            await db.execute(
-                sq_update(Job).where(Job.id == job_id).values(transcript_path=transcript_path)
+            def transcribe_progress(pct):
+                asyncio.run_coroutine_threadsafe(
+                    update_job_status(job_id, "transcribing", 22 + int(pct * 0.22), f"Transcribing... {pct}%"),
+                    loop,
+                )
+
+            transcriber = Transcriber(
+                model_name=settings.whisper_model,
+                device=settings.whisper_device,
+                compute_type=settings.whisper_compute_type,
             )
-            await db.commit()
+            transcript = await transcriber.transcribe_async(audio_path, progress_callback=transcribe_progress)
+
+            transcript_path = str(cached_transcript)
+            transcriber.save_transcript(transcript, transcript_path)
+
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import update as sq_update
+                await db.execute(
+                    sq_update(Job).where(Job.id == job_id).values(transcript_path=transcript_path)
+                )
+                await db.commit()
 
         # ── Step 3: Analyze with Groq ─────────────────────────────────
-        await update_job_status(job_id, "analyzing", 45, "Detecting viral moments with Groq AI...")
-        logger.info(f"[{job_id}] Analyzing viral moments...")
+        viral_moments_path = temp_dir / "viral_moments.json"
 
-        chunks = transcript.get_chunks_for_analysis(chunk_duration=180.0)
-        analyzer = GroqAnalyzer(api_key=settings.groq_api_key)
+        if viral_moments_path.exists():
+            logger.info(f"[{job_id}] ✓ Step 3 checkpoint: viral_moments.json found, skipping Groq call.")
+            await update_job_status(job_id, "analyzing", 54, "Viral moments already detected, resuming...")
+            with open(viral_moments_path, "r", encoding="utf-8") as f:
+                moments_raw = json.load(f)
+            viral_moments = [
+                ViralMoment(
+                    start_time=float(m["start_time"]),
+                    end_time=float(m["end_time"]),
+                    score=int(m["score"]),
+                    reason=m.get("reason", ""),
+                    hook_words=m.get("hook_words", ""),
+                    scores=m.get("scores", {}),
+                )
+                for m in moments_raw
+            ]
+        else:
+            await update_job_status(job_id, "analyzing", 45, "Detecting viral moments with Groq AI...")
+            logger.info(f"[{job_id}] Step 3: Analyzing viral moments with Groq...")
 
-        viral_moments = await analyzer.detect_viral_moments(
-            transcript_chunks=chunks,
-            num_clips=num_clips,
-            min_duration=clip_min_duration,
-            max_duration=clip_max_duration,
-        )
+            chunks = transcript.get_chunks_for_analysis(chunk_duration=180.0)
+            analyzer = GroqAnalyzer(
+                api_key=settings.groq_api_key,
+                detection_model=settings.groq_detection_model,
+                hook_model=settings.groq_hook_model,
+            )
+
+            viral_moments = await analyzer.detect_viral_moments(
+                transcript_chunks=chunks,
+                num_clips=num_clips,
+                min_duration=clip_min_duration,
+                max_duration=clip_max_duration,
+            )
+
+            # Persist so future retries skip this expensive step
+            moments_json = [
+                {
+                    "start_time": m.start_time,
+                    "end_time": m.end_time,
+                    "score": m.score,
+                    "reason": m.reason,
+                    "hook_words": m.hook_words,
+                    "scores": m.scores,
+                }
+                for m in viral_moments
+            ]
+            with open(viral_moments_path, "w", encoding="utf-8") as f:
+                json.dump(moments_json, f, indent=2, ensure_ascii=False)
+            logger.info(f"[{job_id}] Saved {len(viral_moments)} viral moments to {viral_moments_path}")
 
         logger.info(f"[{job_id}] Found {len(viral_moments)} viral moments")
 
@@ -154,17 +239,45 @@ async def run_pipeline(
         )
         bg_mixer = BackgroundMixer(settings.assets_dir)
         scorer = ViralityScorer()
+        hook_analyzer = GroqAnalyzer(
+            api_key=settings.groq_api_key,
+            detection_model=settings.groq_detection_model,
+            hook_model=settings.groq_hook_model,
+        )
 
         clip_records = []
         total_clips = len(viral_moments)
 
         for i, moment in enumerate(viral_moments):
-            clip_id = str(uuid.uuid4())
-            clip_progress = 55 + int((i / total_clips) * 35)
+            clip_progress = 55 + int((i / max(total_clips, 1)) * 35)
             await update_job_status(
                 job_id, "clipping", clip_progress,
                 f"Processing clip {i+1}/{total_clips}..."
             )
+
+            # ── Per-clip checkpoint ───────────────────────────────────
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                result = await db.execute(
+                    select(Clip).where(Clip.job_id == job_id, Clip.clip_index == i)
+                )
+                existing_clip = result.scalars().first()
+
+            if existing_clip:
+                if existing_clip.status == "done" and existing_clip.export_path and os.path.exists(existing_clip.export_path):
+                    logger.info(f"[{job_id}] ✓ Clip {i+1} checkpoint: already done, skipping.")
+                    clip_records.append(existing_clip.id)
+                    continue
+                else:
+                    # Remove incomplete record so we retry cleanly
+                    logger.warning(f"[{job_id}] Clip {i+1} is incomplete — removing stale DB record and retrying.")
+                    async with AsyncSessionLocal() as db:
+                        from sqlalchemy import delete
+                        await db.execute(delete(Clip).where(Clip.id == existing_clip.id))
+                        await db.execute(delete(Hook).where(Hook.clip_id == existing_clip.id))
+                        await db.commit()
+
+            clip_id = str(uuid.uuid4())
 
             try:
                 # Extract raw clip
@@ -172,9 +285,7 @@ async def run_pipeline(
                 await clipper.extract_clip_async(video_path, moment.start_time, moment.end_time, raw_path)
 
                 # Face track for smart crop
-                face_positions = await face_tracker.analyze_video_async(
-                    raw_path, sample_interval=2.0
-                )
+                face_positions = await face_tracker.analyze_video_async(raw_path, sample_interval=2.0)
 
                 # Crop to vertical 9:16
                 cropped_path = str(temp_dir / f"clip_{i}_cropped.mp4")
@@ -183,27 +294,23 @@ async def run_pipeline(
                 # Generate captions
                 words = transcript.get_words_in_range(moment.start_time, moment.end_time)
                 ass_path = str(temp_dir / f"clip_{i}_captions.ass")
-                await caption_gen.generate_ass_file_async(
-                    words, ass_path, caption_style, moment.start_time
-                )
+                await caption_gen.generate_ass_file_async(words, ass_path, caption_style, moment.start_time)
 
                 captioned_path = str(temp_dir / f"clip_{i}_captioned.mp4")
                 await caption_gen.burn_captions_async(cropped_path, ass_path, captioned_path)
 
                 # Add gaming background
                 export_path = str(export_dir / f"clip_{i+1}_{int(moment.score)}.mp4")
-                await bg_mixer.mix_with_background_async(
-                    captioned_path, export_path, background_type
-                )
+                await bg_mixer.mix_with_background_async(captioned_path, export_path, background_type)
 
-                # Generate hooks
+                # Generate hooks with quality model
                 clip_text = " ".join(w.word for w in words)
-                hooks = await analyzer.generate_hooks(clip_text, info.title)
+                hooks = await hook_analyzer.generate_hooks(clip_text, yt_title)
 
                 # Compute final virality score
                 final_score = scorer.compute_score(moment.scores)
 
-                # Save clip to DB
+                # Persist to DB
                 async with AsyncSessionLocal() as db:
                     clip = Clip(
                         id=clip_id,
@@ -246,7 +353,7 @@ async def run_pipeline(
                     await db.commit()
 
                 clip_records.append(clip_id)
-                logger.info(f"[{job_id}] Clip {i+1} done: score={final_score}")
+                logger.info(f"[{job_id}] Clip {i+1}/{total_clips} done: score={final_score}")
 
             except Exception as e:
                 logger.error(f"[{job_id}] Clip {i+1} failed: {e}", exc_info=True)

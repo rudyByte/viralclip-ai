@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   ArrowLeft, Download, RefreshCw, Copy, Check, Info, AlertTriangle,
   Play, Pause, Volume2, VolumeX, Sparkles, Youtube, CheckCircle2,
-  ListRestart, Loader2, Gauge, Flame, Terminal, HelpCircle, RefreshCw as LoopIcon
+  ListRestart, Loader2, Gauge, Flame, Terminal, HelpCircle, Sliders, RefreshCw as LoopIcon
 } from 'lucide-react'
 import { 
   getJobStatus, getClips, getClipHooks, 
@@ -27,9 +27,9 @@ const TERMINAL_LOGS = {
     '[DOWNLOAD] Running yt-dlp binary...'
   ],
   transcribing: [
-    '[WHISPER] Loading faster-whisper Large-v3-turbo model...',
-    '[WHISPER] Initializing CUDA execution context...',
+    '[WHISPER] Loading faster-whisper small model (int8/CPU)...',
     '[WHISPER] Audio normalization complete.',
+    '[WHISPER] Running VAD filter to remove silence...',
     '[WHISPER] Generating word-level transcript timestamps...',
     '[WHISPER] Detecting speaker segments and language details...'
   ],

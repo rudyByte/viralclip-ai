@@ -109,7 +109,7 @@ export default function Settings() {
                   <p className="text-xs text-slate-400 mt-1">Generating word-level speech transcriptions</p>
                 </div>
                 <span className="px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
-                  {config?.whisper_model || health?.whisper_model || 'large-v3-turbo'}
+                  {config?.whisper_model || health?.whisper_model || 'small'}
                 </span>
               </div>
 

@@ -56,6 +56,17 @@ class BackgroundMixer:
             gameplay_volume=gameplay_volume,
         )
 
+    def _has_audio(self, video_path: str) -> bool:
+        """Check if a video file has an audio stream."""
+        cmd = [
+            "ffprobe", "-v", "quiet",
+            "-show_streams",
+            "-select_streams", "a",
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return "codec_type=audio" in result.stdout
+
     def _stack_videos(
         self,
         clip_path: str,
@@ -71,34 +82,49 @@ class BackgroundMixer:
         """
         w = self.export_width
         half_h = self.half_height
+        has_gameplay_audio = self._has_audio(gameplay_path)
 
         # Filter complex:
         # [0:v] → scale + pad to top half (1080x960)
         # [1:v] → scale + random seek + loop to bottom half (1080x960)
         # Stack vertically → 1080x1920
-        # Mix audio: clip at full vol, gameplay muted/low
+        # Mix audio: clip at full vol, gameplay muted/low if gameplay has audio
 
-        filter_complex = (
-            f"[0:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black[top];"
+        if has_gameplay_audio:
+            filter_complex = (
+                f"[0:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black[top];"
 
-            f"[1:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"trim=duration={clip_duration},setpts=PTS-STARTPTS[bot];"
+                f"[1:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black,"
+                f"trim=duration={clip_duration},setpts=PTS-STARTPTS[bot];"
 
-            f"[top][bot]vstack=inputs=2[v];"
+                f"[top][bot]vstack=inputs=2[v];"
 
-            f"[0:a]volume={clip_volume}[main_a];"
-            f"[1:a]volume={gameplay_volume}[game_a];"
-            f"[main_a][game_a]amix=inputs=2:normalize=0[a]"
-        )
+                f"[0:a]volume={clip_volume}[main_a];"
+                f"[1:a]volume={gameplay_volume}[game_a];"
+                f"[main_a][game_a]amix=inputs=2:normalize=0[a]"
+            )
+            map_audio = "[a]"
+        else:
+            filter_complex = (
+                f"[0:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black[top];"
+
+                f"[1:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black,"
+                f"trim=duration={clip_duration},setpts=PTS-STARTPTS[bot];"
+
+                f"[top][bot]vstack=inputs=2[v]"
+            )
+            map_audio = "0:a"
 
         cmd = [
             "ffmpeg", "-y",
             "-i", clip_path,
             "-stream_loop", "-1", "-i", gameplay_path,
             "-filter_complex", filter_complex,
-            "-map", "[v]", "-map", "[a]",
+            "-map", "[v]", "-map", map_audio,
             "-t", str(clip_duration),
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
             "-c:a", "aac", "-b:a", "192k",

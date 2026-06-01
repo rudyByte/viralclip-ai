@@ -121,6 +121,36 @@ async def temp_cleanup_loop():
         logger.error(f"Error in temp cleanup scheduler loop: {e}", exc_info=True)
 
 
+async def reset_stale_jobs():
+    """
+    Re-queue any jobs that were interrupted during a previous run.
+    The checkpoint pipeline will resume them from their last saved phase.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select, update
+            stale_query = select(Job).where(Job.status.in_(["downloading", "transcribing", "analyzing", "clipping"]))
+            stale_jobs = (await db.execute(stale_query)).scalars().all()
+            if stale_jobs:
+                logger.info(
+                    f"Found {len(stale_jobs)} stale jobs on startup — re-queueing for checkpoint resume."
+                )
+                await db.execute(
+                    update(Job)
+                    .where(Job.status.in_(["downloading", "transcribing", "analyzing", "clipping"]))
+                    .values(
+                        status="queued",
+                        progress=0,
+                        current_step="Resuming from checkpoint...",
+                        error_message=None,
+                        completed_at=None,
+                    )
+                )
+                await db.commit()
+    except Exception as e:
+        logger.error(f"Error resetting stale jobs: {e}", exc_info=True)
+
+
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -129,9 +159,11 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     await init_db()
     logger.info(f"Database initialized")
+    await reset_stale_jobs()
     logger.info(f"Temp dir: {settings.temp_dir}")
     logger.info(f"Export dir: {settings.export_dir}")
-    logger.info(f"Groq model: llama-3.3-70b-versatile")
+    logger.info(f"Groq detection model: {settings.groq_detection_model}")
+    logger.info(f"Groq hook model:      {settings.groq_hook_model}")
     logger.info(f"Whisper model: {settings.whisper_model}")
     
     # Start background tasks
@@ -272,10 +304,12 @@ async def get_config():
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+    should_reload = settings.debug and os.getenv("RUNNING_IN_DOCKER") != "true"
     uvicorn.run(
         "main:app",
         host=settings.app_host,
         port=settings.app_port,
-        reload=settings.debug,
+        reload=should_reload,
         log_level="info",
     )

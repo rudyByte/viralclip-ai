@@ -114,12 +114,14 @@ class Transcriber:
     def _load_model(self):
         """Load faster-whisper model (cached at class level)."""
         if Transcriber._model is None:
-            logger.info(f"Loading faster-whisper model: {self.model_name} on {self.device}")
+            logger.info(f"Loading faster-whisper model: {self.model_name} on {self.device} ({self.compute_type})")
             from faster_whisper import WhisperModel
             Transcriber._model = WhisperModel(
                 self.model_name,
                 device=self.device,
                 compute_type=self.compute_type,
+                cpu_threads=4,          # Use 4 CPU threads for inference
+                num_workers=1,
             )
             logger.info("Whisper model loaded successfully")
         return Transcriber._model
@@ -140,10 +142,10 @@ class Transcriber:
         segments_raw, info = model.transcribe(
             audio_path,
             word_timestamps=True,
-            beam_size=5,
-            language=None,  # auto-detect
-            condition_on_previous_text=True,
-            vad_filter=True,                # Filter silence
+            beam_size=1,                # Greedy decoding — 4x faster on CPU
+            language=None,              # auto-detect
+            condition_on_previous_text=False,  # Prevent repetition hang on long audio
+            vad_filter=True,            # Filter silence
             vad_parameters=dict(min_silence_duration_ms=500),
         )
 

@@ -26,6 +26,8 @@ services:
       - ASSETS_DIR=/app/assets
       - MODELS_DIR=/app/models
       - FRONTEND_URL=http://localhost:3000
+      - RUNNING_IN_DOCKER=true
+      - HF_HOME=/app/models
 
   frontend:
     build:

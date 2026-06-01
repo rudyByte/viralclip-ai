@@ -1,6 +1,7 @@
 """
 ViralClip AI — Groq LLM Analyzer
-Detects viral moments from transcript using llama-3.3-70b-versatile.
+Uses llama-3.1-8b-instant for bulk viral detection (500K TPD free tier)
+and llama-3.3-70b-versatile only for hook generation.
 """
 import json
 import asyncio
@@ -8,85 +9,32 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Optional
-from groq import Groq, AsyncGroq
+from groq import AsyncGroq
 
 logger = logging.getLogger(__name__)
 
-VIRAL_DETECTION_PROMPT = """You are a viral short-form content strategist with 10 years of experience creating YouTube Shorts, TikToks, and Instagram Reels that rack up millions of views.
+# Compact prompt — ~200 tokens vs ~500 previously
+VIRAL_DETECTION_PROMPT = """Viral content strategist. Find TOP {num_clips} viral moments in this transcript.
 
-Analyze the transcript below and identify the TOP {num_clips} most viral-worthy moments.
+Timestamps are raw seconds (e.g. 180.50). Return start_time/end_time as raw float seconds.
+Each clip: {min_duration}–{max_duration} seconds. Never cut mid-sentence.
 
-Score each moment across these dimensions (0–10 each):
-- curiosity_hook: Does it make viewers desperate to know what comes next?
-- emotional_intensity: Fear, excitement, inspiration, anger, joy, or surprise?
-- controversy: Does it challenge a popular belief or spark debate?
-- storytelling: Clear setup → conflict → resolution arc present?
-- novelty: Is the info surprising, counterintuitive, or rarely known?
-- retention: Would a viewer watch the full clip without scrolling away?
-- audience_hook: Does it directly address a specific audience's pain or desire?
-- educational_value: Does it teach something genuinely useful or insightful?
-
-IMPORTANT RULES:
-- Each clip must be {min_duration}–{max_duration} seconds long (based on timestamps)
-- Never cut mid-sentence — find natural break points
-- The first 3 words of each clip must immediately hook the viewer
-- Prioritize moments with emotional peaks, surprising reveals, or strong hooks
-- Sort results by overall score descending
+Score 0-10: curiosity_hook, emotional_intensity, controversy, storytelling, novelty, retention, audience_hook, educational_value
 
 TRANSCRIPT:
 {transcript}
 
-Return ONLY a valid JSON array — no markdown fences, no explanation, no commentary:
-[
-  {{
-    "start_time": <float seconds>,
-    "end_time": <float seconds>,
-    "score": <integer 0-100>,
-    "reason": "<one compelling sentence explaining viral potential>",
-    "hook_words": "<first 5-7 words that open this clip>",
-    "scores": {{
-      "curiosity_hook": <0-10>,
-      "emotional_intensity": <0-10>,
-      "controversy": <0-10>,
-      "storytelling": <0-10>,
-      "novelty": <0-10>,
-      "retention": <0-10>,
-      "audience_hook": <0-10>,
-      "educational_value": <0-10>
-    }}
-  }}
-]"""
+Return ONLY a JSON array, no markdown:
+[{{"start_time":<float>,"end_time":<float>,"score":<int 0-100>,"reason":"<one sentence>","hook_words":"<first 5 words>","scores":{{"curiosity_hook":<int>,"emotional_intensity":<int>,"controversy":<int>,"storytelling":<int>,"novelty":<int>,"retention":<int>,"audience_hook":<int>,"educational_value":<int>}}}}]"""
 
-HOOK_GENERATOR_PROMPT = """You are a viral content copywriter who specializes in YouTube Shorts, TikTok, and Instagram Reels.
+# Compact hook prompt — ~150 tokens vs ~350 previously
+HOOK_GENERATOR_PROMPT = """Viral copywriter. Generate hooks for this clip.
 
-Given this transcript excerpt from a short video clip, generate compelling content hooks.
+TRANSCRIPT: {transcript}
+CONTEXT: {context}
 
-TRANSCRIPT:
-{transcript}
-
-TOPIC/CONTEXT: {context}
-
-Generate the following in JSON format:
-{{
-  "titles": [
-    "<YouTube Short title 1 — max 60 chars, curiosity-driven>",
-    "<YouTube Short title 2 — controversy angle>",
-    "<YouTube Short title 3 — value/benefit angle>"
-  ],
-  "hooks": [
-    "<TikTok opening hook 1 — starts with action verb>",
-    "<TikTok opening hook 2 — starts with a number or stat>",
-    "<TikTok opening hook 3 — starts with a question>"
-  ],
-  "captions": [
-    "<Instagram caption 1 with emojis>",
-    "<Instagram caption 2 — storytelling format>"
-  ],
-  "hashtags": ["<tag1>", "<tag2>", "<tag3>", "<tag4>", "<tag5>", "<tag6>", "<tag7>", "<tag8>"],
-  "thumbnail_text": "<Bold 3-5 word thumbnail text — UPPERCASE format>"
-}}
-
-Return ONLY valid JSON — no markdown, no explanation."""
+Return ONLY JSON:
+{{"titles":["<title1>","<title2>","<title3>"],"hooks":["<hook1>","<hook2>","<hook3>"],"captions":["<caption1>","<caption2>"],"hashtags":["<tag1>","<tag2>","<tag3>","<tag4>","<tag5>","<tag6>"],"thumbnail_text":"<3-5 WORDS UPPERCASE>"}}"""
 
 
 @dataclass
@@ -117,31 +65,38 @@ class HookContent:
 
 
 class GroqAnalyzer:
-    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile"):
+    def __init__(
+        self,
+        api_key: str,
+        detection_model: str = "llama-3.1-8b-instant",
+        hook_model: str = "llama-3.3-70b-versatile",
+    ):
         self.api_key = api_key
-        self.model = model
+        self.detection_model = detection_model
+        self.hook_model = hook_model
         self.client = AsyncGroq(api_key=api_key)
 
     def _clean_json_response(self, text: str) -> str:
         """Strip markdown fences and extract JSON from LLM response."""
-        # Remove ```json ... ``` or ``` ... ```
         text = re.sub(r"```(?:json)?\s*", "", text)
         text = re.sub(r"```\s*", "", text)
         text = text.strip()
-
-        # Find first [ or { to start of JSON
         for i, ch in enumerate(text):
             if ch in ("[", "{"):
                 text = text[i:]
                 break
-
-        # Find last ] or } to end of JSON
         for i in range(len(text) - 1, -1, -1):
             if text[i] in ("]", "}"):
                 text = text[:i + 1]
                 break
-
         return text
+
+    def _compress_chunk_text(self, text: str, max_chars: int = 3500) -> str:
+        """Compress a transcript chunk to reduce token usage."""
+        # Collapse multiple spaces/newlines
+        text = re.sub(r"\s+", " ", text).strip()
+        # Hard truncate if still too long
+        return text[:max_chars]
 
     async def detect_viral_moments(
         self,
@@ -151,26 +106,21 @@ class GroqAnalyzer:
         max_duration: int = 60,
     ) -> list[ViralMoment]:
         """
-        Send transcript chunks to Groq and extract viral moments.
-        Handles long videos by processing in chunks and merging results.
+        Detect viral moments using llama-3.1-8b-instant (500K TPD).
+        Processes transcript in batches, deduplicates and returns top N.
         """
         all_moments = []
 
-        # Build full transcript text with timestamps for context
-        full_transcript = ""
-        for chunk in transcript_chunks:
-            start_min = int(chunk["start"]) // 60
-            start_sec = int(chunk["start"]) % 60
-            full_transcript += f"\n[{start_min:02d}:{start_sec:02d}] {chunk['text']}"
-
-        # For long transcripts, process in batches
-        max_chars = 12000  # ~3k tokens, safe for llama-3.3-70b context
+        # Larger batches = fewer API calls = fewer tokens on prompt overhead
+        max_chars = 14000
         batches = self._split_transcript_into_batches(transcript_chunks, max_chars)
         clips_per_batch = max(2, num_clips // len(batches) + 1)
 
+        logger.info(f"Analyzing {len(batches)} batches with {self.detection_model} for {clips_per_batch} clips/batch")
+
         for batch_idx, batch in enumerate(batches):
             batch_text = "\n".join(
-                f"[{int(c['start'])//60:02d}:{int(c['start'])%60:02d}] {c['text']}"
+                f"[{c['start']:.2f}] {self._compress_chunk_text(c['text'])}"
                 for c in batch
             )
 
@@ -181,18 +131,20 @@ class GroqAnalyzer:
                 transcript=batch_text,
             )
 
+            raw = ""
             try:
                 response = await self.client.chat.completions.create(
-                    model=self.model,
+                    model=self.detection_model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
-                    max_tokens=4096,
+                    max_tokens=1024,  # Was 4096 — JSON for 3 clips needs <500 tokens
                 )
 
                 raw = response.choices[0].message.content
                 clean = self._clean_json_response(raw)
                 moments_data = json.loads(clean)
 
+                batch_valid = 0
                 for m in moments_data:
                     moment = ViralMoment(
                         start_time=float(m.get("start_time", 0)),
@@ -204,17 +156,19 @@ class GroqAnalyzer:
                     )
                     if moment.duration >= min_duration and moment.score > 0:
                         all_moments.append(moment)
+                        batch_valid += 1
 
-                logger.info(f"Batch {batch_idx + 1}/{len(batches)}: found {len(moments_data)} moments")
+                logger.info(f"Batch {batch_idx + 1}/{len(batches)}: {batch_valid} valid moments")
 
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.error(f"Failed to parse Groq response: {e}\nRaw: {raw[:500]}")
+            except (json.JSONDecodeError, KeyError, Exception) as e:
+                logger.error(f"Batch {batch_idx + 1} failed: {e} | Raw: {raw[:300]}")
                 continue
 
-        # Sort by score, deduplicate overlapping clips, take top N
+        # Sort, deduplicate overlapping clips, return top N
         all_moments.sort(key=lambda m: m.score, reverse=True)
-        final_moments = self._deduplicate_moments(all_moments)
-        return final_moments[:num_clips]
+        final = self._deduplicate_moments(all_moments)
+        logger.info(f"Final viral moments after dedup: {len(final[:num_clips])}")
+        return final[:num_clips]
 
     def _split_transcript_into_batches(
         self,
@@ -222,41 +176,30 @@ class GroqAnalyzer:
         max_chars: int,
     ) -> list[list[dict]]:
         """Split transcript chunks into batches under max_chars."""
-        batches = []
-        current_batch = []
-        current_len = 0
-
+        batches, current_batch, current_len = [], [], 0
         for chunk in chunks:
             chunk_len = len(chunk["text"])
             if current_len + chunk_len > max_chars and current_batch:
                 batches.append(current_batch)
-                current_batch = []
-                current_len = 0
+                current_batch, current_len = [], 0
             current_batch.append(chunk)
             current_len += chunk_len
-
         if current_batch:
             batches.append(current_batch)
-
         return batches if batches else [chunks]
 
     def _deduplicate_moments(self, moments: list[ViralMoment]) -> list[ViralMoment]:
-        """Remove overlapping moments, keeping the highest scored one."""
+        """Remove overlapping moments, keeping highest scored."""
         if not moments:
             return []
-
         result = [moments[0]]
         for candidate in moments[1:]:
-            overlaps = False
-            for kept in result:
-                overlap_start = max(candidate.start_time, kept.start_time)
-                overlap_end = min(candidate.end_time, kept.end_time)
-                if overlap_end > overlap_start:  # They overlap
-                    overlaps = True
-                    break
+            overlaps = any(
+                min(candidate.end_time, kept.end_time) > max(candidate.start_time, kept.start_time)
+                for kept in result
+            )
             if not overlaps:
                 result.append(candidate)
-
         return result
 
     async def generate_hooks(
@@ -264,23 +207,22 @@ class GroqAnalyzer:
         transcript_text: str,
         context: str = "",
     ) -> HookContent:
-        """Generate viral titles, hooks, captions, and hashtags for a clip."""
+        """Generate viral hooks using llama-3.3-70b-versatile (quality copywriting)."""
         prompt = HOOK_GENERATOR_PROMPT.format(
-            transcript=transcript_text[:3000],
-            context=context,
+            transcript=transcript_text[:2000],  # Reduced from 3000
+            context=context[:200],
         )
 
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=1024,
-        )
-
-        raw = response.choices[0].message.content
-        clean = self._clean_json_response(raw)
-
+        raw = ""
         try:
+            response = await self.client.chat.completions.create(
+                model=self.hook_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=512,  # Was 1024
+            )
+            raw = response.choices[0].message.content
+            clean = self._clean_json_response(raw)
             data = json.loads(clean)
             return HookContent(
                 titles=data.get("titles", []),
@@ -289,6 +231,6 @@ class GroqAnalyzer:
                 hashtags=data.get("hashtags", []),
                 thumbnail_text=data.get("thumbnail_text", ""),
             )
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse hook response: {e}")
+        except Exception as e:
+            logger.error(f"Hook generation failed: {e} | Raw: {raw[:200]}")
             return HookContent([], [], [], [], "")

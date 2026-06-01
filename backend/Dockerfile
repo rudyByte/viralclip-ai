@@ -5,6 +5,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
+# Cache HuggingFace models in the mapped Docker volume
+ENV HF_HOME=/app/models
 
 # Set working directory inside container
 WORKDIR /app
@@ -28,5 +30,5 @@ COPY . /app/
 # Expose backend port
 EXPOSE 8000
 
-# Start backend using python main.py (which runs uvicorn)
-CMD ["python", "main.py"]
+# Start uvicorn directly — NO reload to prevent watchfiles killing running pipeline jobs
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

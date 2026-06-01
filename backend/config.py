@@ -12,6 +12,9 @@ import os
 class Settings(BaseSettings):
     # API Keys
     groq_api_key: str = Field(..., env="GROQ_API_KEY")
+    # Use a high-TPD model for bulk detection (500K/day free), big model only for hook copy
+    groq_detection_model: str = Field("llama-3.1-8b-instant", env="GROQ_DETECTION_MODEL")
+    groq_hook_model: str = Field("llama-3.3-70b-versatile", env="GROQ_HOOK_MODEL")
 
     # App
     app_host: str = Field("0.0.0.0", env="APP_HOST")
@@ -28,9 +31,9 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = Field(2, env="MAX_CONCURRENT_JOBS")
 
     # Whisper
-    whisper_model: str = Field("large-v3", env="WHISPER_MODEL")
-    whisper_device: str = Field("auto", env="WHISPER_DEVICE")
-    whisper_compute_type: str = Field("float16", env="WHISPER_COMPUTE_TYPE")
+    whisper_model: str = Field("small", env="WHISPER_MODEL")
+    whisper_device: str = Field("cpu", env="WHISPER_DEVICE")
+    whisper_compute_type: str = Field("int8", env="WHISPER_COMPUTE_TYPE")
 
     # Clip Defaults
     default_clip_min_duration: int = Field(30, env="DEFAULT_CLIP_MIN_DURATION")
