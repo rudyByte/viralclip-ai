@@ -353,13 +353,23 @@ async def debug_ytdlp(url: str = "https://www.youtube.com/watch?v=FR2SkETgQ0o", 
             cmd.extend(["--cookies", "/app/cookies.txt"])
         elif os.path.exists("/app/data/cookies.txt"):
             cmd.extend(["--cookies", "/app/data/cookies.txt"])
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return {
-        "args": cmd,
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-    }
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        return {
+            "args": cmd,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+    except subprocess.TimeoutExpired as te:
+        # te.stdout and te.stderr might be bytes or string depending on Python version and run options,
+        # but since we set text=True they should be strings or bytes if not captured.
+        return {
+            "args": cmd,
+            "error": "TimeoutExpired",
+            "stdout": str(te.stdout or ""),
+            "stderr": str(te.stderr or ""),
+        }
 
 
 @app.get("/api/config")
