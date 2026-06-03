@@ -344,55 +344,35 @@ async def health():
 
 @app.get("/api/debug_ytdlp")
 async def debug_ytdlp(url: str = "https://www.youtube.com/watch?v=FR2SkETgQ0o"):
-    import yt_dlp
+    import shutil
+    import subprocess
     
-    clients = ["web", "android", "ios", "mweb", "tv", "web_embedded", "tv_embedded"]
-    cookie_paths = ["cookies.txt", "/app/cookies.txt", "/app/data/cookies.txt"]
-    existing_cookie_path = None
-    for p in cookie_paths:
-        if os.path.exists(p):
-            existing_cookie_path = p
-            break
+    node_path = shutil.which("node")
+    nodejs_path = shutil.which("nodejs")
+    
+    node_version = None
+    if node_path:
+        try:
+            r = subprocess.run(["node", "-v"], capture_output=True, text=True, timeout=5)
+            node_version = r.stdout.strip()
+        except Exception as e:
+            node_version = f"Error: {e}"
             
-    results = []
-    
-    for client in clients:
-        for use_cookies in [True, False]:
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": True,
-                "nocheckcertificate": True,
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": [client]
-                    }
-                }
-            }
-            if use_cookies and existing_cookie_path:
-                ydl_opts["cookiefile"] = existing_cookie_path
-                
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    formats = [f.get("format_id") for f in info.get("formats", [])]
-                    results.append({
-                        "client": client,
-                        "use_cookies": use_cookies,
-                        "success": True,
-                        "formats_count": len(formats),
-                        "formats": formats[:10]  # first 10
-                    })
-            except Exception as e:
-                results.append({
-                    "client": client,
-                    "use_cookies": use_cookies,
-                    "success": False,
-                    "error": str(e)[:200]
-                })
-                
+    nodejs_version = None
+    if nodejs_path:
+        try:
+            r = subprocess.run(["nodejs", "-v"], capture_output=True, text=True, timeout=5)
+            nodejs_version = r.stdout.strip()
+        except Exception as e:
+            nodejs_version = f"Error: {e}"
+            
     return {
-        "cookie_file_found": existing_cookie_path,
-        "results": results
+        "node_path": node_path,
+        "nodejs_path": nodejs_path,
+        "node_version": node_version,
+        "nodejs_version": nodejs_version,
+        "env_path": os.environ.get("PATH"),
+        "uid": os.getuid() if hasattr(os, "getuid") else None,
     }
 
 
