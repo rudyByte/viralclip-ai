@@ -70,29 +70,17 @@ def test_curl_cffi():
         targets = []
         available_targets = []
         
-        try:
-            # List all targets in yt-dlp network module
-            import yt_dlp.networking.impersonate as imp_mod
-            targets = [attr for attr in dir(imp_mod) if not attr.startswith("_")]
-            
-            # Check availability of specific browsers
-            for t in ["chrome", "firefox", "safari", "edge"]:
-                try:
-                    # Let's inspect if chrome or other keys can be resolved
-                    targets.append(f"has_impersonate_target_{t}: {hasattr(imp_mod, t)}")
-                except Exception as ex:
-                    available_targets.append(f"{t}: Error({ex})")
-        except Exception as e:
-            targets = [f"Inspect error: {e}"]
-            
+        import inspect
+        import yt_dlp.networking.impersonate as imp_mod
+        source = inspect.getsource(imp_mod)
+        
         return {
             "success": True, 
             "message": "curl_cffi loaded and executed successfully", 
             "status_code": r.status_code,
             "curl_cffi_version": getattr(curl_cffi, "__version__", "unknown"),
             "yt_dlp_version": getattr(yt_dlp, "__version__", "unknown"),
-            "targets": targets,
-            "available_targets": available_targets
+            "source": source
         }
     except Exception as e:
         import traceback
