@@ -57,32 +57,3 @@ def get_logs():
         except Exception as e:
             return {"success": False, "error": str(e)}
     return {"success": False, "error": f"Log file not found at {log_file}"}
-
-
-@router.get("/test-impersonate")
-def test_impersonate():
-    try:
-        import yt_dlp
-        import yt_dlp.networking.impersonate as imp_mod
-        
-        # Subclasses
-        subclasses = []
-        try:
-            import yt_dlp.networking._curlcffi as curl_mod
-            subclasses = [cls.__name__ for cls in imp_mod.ImpersonateRequestHandler.__subclasses__()]
-            supported = list(getattr(curl_mod.CurlCFFIRH, "_SUPPORTED_IMPERSONATE_TARGET_MAP", {}).keys())
-        except Exception as e:
-            subclasses = ["error: " + str(e)]
-            supported = []
-            
-        import curl_cffi
-        return {
-            "success": True,
-            "subclasses": subclasses,
-            "supported_targets": [str(t) for t in supported],
-            "curl_cffi_version": getattr(curl_cffi, "__version__", None),
-            "yt_dlp_version": getattr(yt_dlp.version, "__version__", None)
-        }
-    except Exception as e:
-        import traceback
-        return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
