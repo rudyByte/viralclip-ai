@@ -110,6 +110,14 @@ class Downloader:
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
             
+        # Enable curl_cffi impersonation if installed
+        try:
+            import curl_cffi
+            opts["impersonate"] = "chrome"
+            logger.info("curl_cffi detected: enabled Chrome browser impersonation for requests.")
+        except ImportError:
+            pass
+            
         if extra_opts:
             for k, v in extra_opts.items():
                 if k == "extractor_args" and "extractor_args" in opts:
