@@ -12,7 +12,6 @@ aiosqlite==0.20.0
 
 # Video Downloading
 yt-dlp
-curl-cffi
 
 # Speech Recognition
 faster-whisper==1.0.3
