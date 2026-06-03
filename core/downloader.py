@@ -12,15 +12,18 @@ from typing import Optional, Callable
 import logging
 import ssl
 
-# Disable strict OpenSSL 3.0+ check for SSL: UNEXPECTED_EOF_WHILE_READING
+# Deep SSL patch: OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances
 try:
-    orig_create_default_context = ssl.create_default_context
-    def patched_create_default_context(*args, **kwargs):
-        context = orig_create_default_context(*args, **kwargs)
-        op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
-        context.options |= op_ignore
-        return context
-    ssl.create_default_context = patched_create_default_context
+    import ssl as _ssl
+    _op_ignore = getattr(_ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
+    _orig_SSLContext_init = _ssl.SSLContext.__init__
+    def _patched_SSLContext_init(self, *args, **kwargs):
+        _orig_SSLContext_init(self, *args, **kwargs)
+        try:
+            self.options |= _op_ignore
+        except Exception:
+            pass
+    _ssl.SSLContext.__init__ = _patched_SSLContext_init
 except Exception:
     pass
 
