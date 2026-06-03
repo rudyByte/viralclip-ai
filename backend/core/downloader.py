@@ -12,15 +12,19 @@ from typing import Optional, Callable
 import logging
 import ssl
 
-# Disable strict OpenSSL 3.0+ check for SSL: UNEXPECTED_EOF_WHILE_READING
+# Deep SSL patch: OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances
 try:
-    orig_create_default_context = ssl.create_default_context
-    def patched_create_default_context(*args, **kwargs):
-        context = orig_create_default_context(*args, **kwargs)
-        op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
-        context.options |= op_ignore
-        return context
-    ssl.create_default_context = patched_create_default_context
+    import ssl as _ssl
+    _op_ignore = getattr(_ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
+    _orig_SSLContext_init = _ssl.SSLContext.__init__
+    def _patched_SSLContext_init(self, *args, **kwargs):
+        if _orig_SSLContext_init is not object.__init__:
+            _orig_SSLContext_init(self, *args, **kwargs)
+        try:
+            self.options |= _op_ignore
+        except Exception:
+            pass
+    _ssl.SSLContext.__init__ = _patched_SSLContext_init
 except Exception:
     pass
 
@@ -57,10 +61,16 @@ class Downloader:
 
     def _get_ydl_opts(self, extra_opts: Optional[dict] = None) -> dict:
         """Construct standard ydl_opts with cookie and client spoofing workarounds."""
-        # Determine format based on chosen resolution
+        # Determine format based on chosen resolution.
+        # Uses a deep fallback chain so ANY available format is accepted.
         res_limit = "1080"
         if self.resolution == "best":
-            video_format = "bestvideo+bestaudio/best"
+            video_format = (
+                "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+                "bestvideo[ext=mp4]+bestaudio/"
+                "bestvideo+bestaudio/"
+                "best[ext=mp4]/best"
+            )
         else:
             if self.resolution == "720p":
                 res_limit = "720"
@@ -68,7 +78,13 @@ class Downloader:
                 res_limit = "480"
             elif self.resolution == "360p":
                 res_limit = "360"
-            video_format = f"bestvideo[ext=mp4][height<={res_limit}]+bestaudio[ext=m4a]/bestvideo[height<={res_limit}]+bestaudio/best[height<={res_limit}]/best"
+            video_format = (
+                f"bestvideo[ext=mp4][height<={res_limit}]+bestaudio[ext=m4a]/"
+                f"bestvideo[ext=mp4][height<={res_limit}]+bestaudio/"
+                f"bestvideo[height<={res_limit}]+bestaudio/"
+                f"best[ext=mp4][height<={res_limit}]/"
+                f"best[height<={res_limit}]/best"
+            )
 
         opts = {
             "quiet": True,
@@ -79,6 +95,12 @@ class Downloader:
             "file_access_retries": 5,
             "nocheckcertificate": True,  # Bypass SSL certificate check drops
             "format": video_format,
+            "extractor_args": {
+                "youtube": {
+                    # web returns pre-muxed mp4 formats; ios/android bypass throttling
+                    "player_client": ["web", "ios", "android"]
+                }
+            }
         }
         
         # Check for cookies file (prioritize custom job-specific cookies)
@@ -96,11 +118,18 @@ class Downloader:
             logger.info(f"Using cookies file: {cookies_file}")
         elif not os.environ.get("RUNNING_IN_DOCKER"):
             # Try using cookies from browser when running locally (not in Docker)
-            # Since cookiesfrombrowser can fail/warn if browsers aren't found/configured,
-            # we will set it here and catch errors/retry dynamically if it raises exception.
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
-            
+
+        # Enable curl_cffi Chrome impersonation if available (bypasses TLS fingerprinting)
+        try:
+            import curl_cffi  # noqa: F401
+            from yt_dlp.networking.impersonate import ImpersonateTarget
+            opts["impersonate"] = ImpersonateTarget(client="chrome")
+            logger.info("curl_cffi detected: enabled ImpersonateTarget(chrome) for yt-dlp.")
+        except Exception as _imp_err:
+            logger.debug(f"curl_cffi impersonation unavailable: {_imp_err}")
+
         if extra_opts:
             for k, v in extra_opts.items():
                 if k == "extractor_args" and "extractor_args" in opts:
@@ -171,20 +200,33 @@ class Downloader:
         
         ydl_opts = self._get_ydl_opts(base_opts)
 
-        max_attempts = 3
+        # Escalating format fallbacks – each attempt is broader than the previous.
+        # This guarantees we always get *something* even if the first choice isn't available.
+        FORMAT_FALLBACKS = [
+            None,                       # attempt 1: use format from _get_ydl_opts (resolution-specific)
+            "bestvideo+bestaudio/best", # attempt 2: any best video+audio combo
+            "best",                     # attempt 3: single stream / whatever exists
+        ]
+        max_attempts = len(FORMAT_FALLBACKS)
+
         for attempt in range(1, max_attempts + 1):
             try:
                 current_opts = ydl_opts.copy()
+                # Strip browser cookies on retry to avoid that triggering its own error
                 if attempt > 1 and "cookiesfrombrowser" in current_opts:
-                    # If first attempt failed, disable browser cookies fallback in case it triggered error
                     del current_opts["cookiesfrombrowser"]
-                    
+                # Override format on retry attempts
+                fallback_fmt = FORMAT_FALLBACKS[attempt - 1]
+                if fallback_fmt is not None:
+                    current_opts["format"] = fallback_fmt
+                    logger.warning(f"Attempt {attempt}: using broader format selector '{fallback_fmt}'")
+
                 with yt_dlp.YoutubeDL(current_opts) as ydl:
                     ydl.download([url])
                 break  # Success
             except Exception as dl_err:
                 if attempt < max_attempts:
-                    wait = 10 * attempt
+                    wait = 8 * attempt
                     logger.warning(f"Download attempt {attempt} failed: {dl_err}. Retrying in {wait}s...")
                     time.sleep(wait)
                 else:
