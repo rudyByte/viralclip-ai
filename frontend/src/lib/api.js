@@ -1,7 +1,9 @@
 import axios from 'axios'
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: `${API_BASE_URL}/api`,
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
 })
@@ -33,10 +35,10 @@ export const regenerateClip = (clipId, data) =>
   api.post(`/clips/${clipId}/regenerate`, data).then((r) => r.data)
 
 export const getDownloadUrl = (clipId) =>
-  `/api/clips/${clipId}/download`
+  `${API_BASE_URL}/api/clips/${clipId}/download`
 
 export const getPreviewUrl = (clipId) =>
-  `/api/clips/${clipId}/preview`
+  `${API_BASE_URL}/api/clips/${clipId}/preview`
 
 
 // ── Config ────────────────────────────────────────────────────────
@@ -44,13 +46,12 @@ export const getConfig = () =>
   api.get('/config').then((r) => r.data)
 
 export const healthCheck = () =>
-  api.get('/health', { baseURL: '' }).then((r) => r.data)
+  api.get('/health', { baseURL: API_BASE_URL }).then((r) => r.data)
 
 // ── WebSocket helper ──────────────────────────────────────────────
 export const createJobSocket = (jobId, onMessage, onClose) => {
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  const host = window.location.host
-  const url = `${protocol}://${host}/ws/job/${jobId}`
+  const wsBase = API_BASE_URL.replace(/^http/, 'ws')
+  const url = `${wsBase}/ws/job/${jobId}`
   const ws = new WebSocket(url)
   ws.onmessage = (e) => onMessage(JSON.parse(e.data))
   ws.onclose = onClose

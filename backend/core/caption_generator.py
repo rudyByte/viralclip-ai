@@ -121,14 +121,20 @@ class CaptionGenerator:
         output_path: str,
         style_name: str = "hormozi",
         clip_start_offset: float = 0.0,
+        language: str = "en",
+        crop_height: int = None,
     ) -> str:
         """
         Generate an ASS subtitle file with word-level highlighting.
         clip_start_offset: subtract this from timestamps (for clipped segments).
+        crop_height: actual height of the cropped clip (e.g. 960, 1152, 1344, 1920).
+                     If None, defaults to self.video_height (1920).
         """
         style = CAPTION_STYLES.get(style_name, CAPTION_STYLES["hormozi"])
+        # Use actual crop height if provided; fall back to full video height
+        actual_h = crop_height if crop_height is not None else self.video_height
 
-        ass_content = self._build_ass_header(style)
+        ass_content = self._build_ass_header(style, language, actual_h)
         ass_content += "\n[Events]\n"
         ass_content += "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
 
@@ -219,17 +225,29 @@ class CaptionGenerator:
 
         return lines
 
-    def _build_ass_header(self, style: CaptionStyle) -> str:
+    def _build_ass_header(self, style: CaptionStyle, language: str = "en", video_height: int = None) -> str:
         bold_val = -1 if style.bold else 0
+        h = video_height if video_height is not None else self.video_height
+        
+        # Override font for Indic scripts (Hindi, Gujarati, etc.) because Impact/Montserrat don't support them
+        font_name = style.font_name
+        indic_langs = ["hi", "gu", "mr", "ne", "sa", "as", "bn", "or", "pa", "ta", "te", "kn", "ml"]
+        if language in indic_langs:
+            font_name = "Nirmala UI"
+
+        # Scale margin_v proportionally to actual crop height
+        # Base margin_v values were designed for 1920px — scale down for smaller crops
+        margin_v = max(40, int(style.margin_v * h / 1920))
+
         return f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {self.video_width}
-PlayResY: {self.video_height}
+PlayResY: {h}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.font_name},{style.font_size},{style.primary_color},{style.highlight_color},{style.outline_color},{style.shadow_color},{bold_val},0,0,0,100,100,0,0,1,{style.outline_size},{style.shadow_size},2,20,20,{style.margin_v},1
+Style: Default,{font_name},{style.font_size},{style.primary_color},{style.highlight_color},{style.outline_color},{style.shadow_color},{bold_val},0,0,0,100,100,0,0,1,{style.outline_size},{style.shadow_size},2,20,20,{margin_v},1
 """
 
     def _seconds_to_ass(self, seconds: float) -> str:

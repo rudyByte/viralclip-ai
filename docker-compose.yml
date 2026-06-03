@@ -9,6 +9,9 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - backend-data:/app/data
       - backend-temp:/app/temp
@@ -37,6 +40,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
       - backend
 

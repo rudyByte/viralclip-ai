@@ -76,16 +76,16 @@ export default function Dashboard() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="p-8 max-w-6xl mx-auto space-y-8"
+      className="p-4 md:p-8 max-w-6xl mx-auto space-y-6 md:space-y-8"
     >
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-white">
+          <h1 className="text-2xl md:text-4xl font-extrabold tracking-tight text-white">
             Welcome to <span className="text-gradient">ViralClip AI</span>
           </h1>
-          <p className="text-slate-400 mt-1">
-            Turn long videos into high-retention short clips, instantly and for free.
+          <p className="text-slate-400 mt-1 text-sm md:text-base">
+            Turn long videos into viral short clips, instantly and for free.
           </p>
         </div>
 
@@ -109,40 +109,40 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="stat-card glass flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Total Videos</p>
-            <h3 className="text-3xl font-extrabold text-white">{totalVideos}</h3>
+      <div className="grid grid-cols-3 gap-3 md:gap-6">
+        <div className="stat-card glass flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="space-y-0.5">
+            <p className="text-slate-500 text-[10px] font-semibold uppercase tracking-wider">Videos</p>
+            <h3 className="text-2xl md:text-3xl font-extrabold text-white">{totalVideos}</h3>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-            <Video className="w-6 h-6" />
-          </div>
-        </div>
-
-        <div className="stat-card glass flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Active Tasks</p>
-            <h3 className="text-3xl font-extrabold text-white">{activeJobs}</h3>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400">
-            <Cpu className={`w-6 h-6 ${activeJobs > 0 ? 'animate-spin-slow' : ''}`} />
+          <div className="w-9 h-9 md:w-12 md:h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+            <Video className="w-4 h-4 md:w-6 md:h-6" />
           </div>
         </div>
 
-        <div className="stat-card glass flex items-center justify-between">
-          <div className="space-y-1">
-            <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Clips Generated</p>
-            <h3 className="text-3xl font-extrabold text-white">{totalClips}</h3>
+        <div className="stat-card glass flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="space-y-0.5">
+            <p className="text-slate-500 text-[10px] font-semibold uppercase tracking-wider">Active</p>
+            <h3 className="text-2xl md:text-3xl font-extrabold text-white">{activeJobs}</h3>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400">
-            <Film className="w-6 h-6" />
+          <div className="w-9 h-9 md:w-12 md:h-12 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400">
+            <Cpu className={`w-4 h-4 md:w-6 md:h-6 ${activeJobs > 0 ? 'animate-spin-slow' : ''}`} />
+          </div>
+        </div>
+
+        <div className="stat-card glass flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="space-y-0.5">
+            <p className="text-slate-500 text-[10px] font-semibold uppercase tracking-wider">Clips</p>
+            <h3 className="text-2xl md:text-3xl font-extrabold text-white">{totalClips}</h3>
+          </div>
+          <div className="w-9 h-9 md:w-12 md:h-12 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400">
+            <Film className="w-4 h-4 md:w-6 md:h-6" />
           </div>
         </div>
       </div>
 
       {/* Main Grid: Create CTA + Job List */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 md:gap-8">
         
         {/* Left Column: Create New CTA */}
         <div className="lg:col-span-4 space-y-6">
@@ -209,7 +209,7 @@ export default function Dashboard() {
                   className="glass card-hover rounded-2xl p-5 flex items-center gap-4 cursor-pointer relative group"
                 >
                   {/* Thumbnail / Placeholder */}
-                  <div className="w-24 aspect-video rounded-xl bg-surface-900 border border-white/10 overflow-hidden flex-shrink-0 relative flex items-center justify-center">
+                  <div className="w-16 md:w-24 aspect-video rounded-xl bg-surface-900 border border-white/10 overflow-hidden flex-shrink-0 relative flex items-center justify-center">
                     {job.thumbnail_url ? (
                       <img 
                         src={job.thumbnail_url} 

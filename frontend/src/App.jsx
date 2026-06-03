@@ -12,11 +12,11 @@ export default function App() {
       {/* Mesh animated background */}
       <div className="mesh-bg" />
 
-      {/* Sidebar */}
+      {/* Sidebar (desktop left rail + mobile top/bottom nav) */}
       <Sidebar />
 
-      {/* Main content */}
-      <main className="flex-1 ml-64 min-h-screen overflow-y-auto">
+      {/* Main content — shifts right on desktop, has top/bottom padding on mobile */}
+      <main className="flex-1 md:ml-64 min-h-screen overflow-y-auto pt-14 pb-16 md:pt-0 md:pb-0">
         <AnimatePresence mode="wait">
           <Routes>
             <Route path="/"          element={<Dashboard />} />

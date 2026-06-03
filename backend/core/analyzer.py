@@ -14,18 +14,107 @@ from groq import AsyncGroq
 logger = logging.getLogger(__name__)
 
 # Compact prompt — ~200 tokens vs ~500 previously
-VIRAL_DETECTION_PROMPT = """Viral content strategist. Find TOP {num_clips} viral moments in this transcript.
+VIRAL_DETECTION_PROMPT = """You are a viral video editor and content strategist. 
+Identify the top {num_clips} viral segments in the transcript below.
 
-Timestamps are raw seconds (e.g. 180.50). Return start_time/end_time as raw float seconds.
-Each clip: {min_duration}–{max_duration} seconds. Never cut mid-sentence.
-
-Score 0-10: curiosity_hook, emotional_intensity, controversy, storytelling, novelty, retention, audience_hook, educational_value
+CRITICAL REQUIREMENTS:
+1. Target Duration: Each segment must be strictly between {min_duration} and {max_duration} seconds long (duration = end_time - start_time).
+2. Hook/Start: The start_time must mark a strong hook or the beginning of an interesting idea.
+3. Logical Ending: The end_time must be a logical cut-off point (e.g., at the end of a sentence, a punchline, or a completed thought). Do not cut off mid-phrase, mid-sentence, or in a way that leaves the viewer hanging without context.
+4. Timestamps: Return start_time and end_time as raw float seconds from the transcript timestamps.
+5. Multilingual support: The transcript might be in English, Hindi, Gujarati, or any other language. Analyze it carefully to find the best viral segments. The reason must be in English, but hook_words should be in the original language.
 
 TRANSCRIPT:
 {transcript}
 
 Return ONLY a JSON array, no markdown:
-[{{"start_time":<float>,"end_time":<float>,"score":<int 0-100>,"reason":"<one sentence>","hook_words":"<first 5 words>","scores":{{"curiosity_hook":<int>,"emotional_intensity":<int>,"controversy":<int>,"storytelling":<int>,"novelty":<int>,"retention":<int>,"audience_hook":<int>,"educational_value":<int>}}}}]"""
+[{{"start_time":<float>,"end_time":<float>,"score":<int 0-100>,"reason":"<one sentence explanation of why this moment goes viral>","hook_words":"<first 5 words of the hook>","scores":{{"curiosity_hook":<int 0-10>,"emotional_intensity":<int 0-10>,"controversy":<int 0-10>,"storytelling":<int 0-10>,"novelty":<int 0-10>,"retention":<int 0-10>,"audience_hook":<int 0-10>,"educational_value":<int 0-10>}}}}]"""
+
+
+def adjust_clip_boundaries(
+    start_time: float,
+    end_time: float,
+    transcript_words: list,
+    min_duration: float,
+    max_duration: float,
+) -> tuple[float, float]:
+    """
+    Align start_time and end_time to actual word boundaries.
+    Search backwards from start_time + max_duration for a logical sentence or pause gap boundary.
+    """
+    if not transcript_words:
+        return start_time, min(end_time, start_time + max_duration)
+
+    # Filter words to get a sorted list of timestamps
+    # Word timestamps might have dict form (if loaded from json) or object form
+    words = []
+    for w in transcript_words:
+        if hasattr(w, "start"):
+            words.append((w.start, w.end, w.word))
+        else:
+            words.append((w.get("start", 0.0), w.get("end", 0.0), w.get("word", "")))
+            
+    words.sort(key=lambda x: x[0])
+    
+    if not words:
+        return start_time, min(end_time, start_time + max_duration)
+
+    # 1. Find first word that starts at or after start_time (or closest to it)
+    start_idx = 0
+    min_diff = float("inf")
+    for idx, (w_start, w_end, w_word) in enumerate(words):
+        diff = abs(w_start - start_time)
+        if diff < min_diff:
+            min_diff = diff
+            start_idx = idx
+
+    actual_start = words[start_idx][0]
+    
+    # 2. Collect candidate end words within [actual_start + min_duration, actual_start + max_duration]
+    valid_end_words = []
+    for idx in range(start_idx, len(words)):
+        w_start, w_end, w_word = words[idx]
+        dur = w_end - actual_start
+        if dur > max_duration:
+            break
+        if dur >= min_duration:
+            valid_end_words.append((idx, w_start, w_end, w_word))
+
+    if not valid_end_words:
+        # Fallback: if no word falls in [min_duration, max_duration], just find the last word that keeps it under max_duration
+        fallback_end = actual_start + max_duration
+        for idx in range(start_idx, len(words)):
+            w_start, w_end, w_word = words[idx]
+            if w_end - actual_start > max_duration:
+                break
+            fallback_end = w_end
+        return actual_start, fallback_end
+
+    # 3. Look for a logical ending word (punctuation or pause)
+    # Search backwards from the end of valid_end_words to find the latest logical point
+    best_end = None
+    for idx_in_valid, (original_idx, w_start, w_end, w_word) in enumerate(reversed(valid_end_words)):
+        clean_word = w_word.strip()
+        
+        # Check punctuation ending
+        ends_with_punc = clean_word and clean_word[-1] in (".", "?", "!", ",", ";", ":", "।")
+        
+        # Check spoken pause (silence to next word > 0.4s)
+        has_pause = False
+        if original_idx < len(words) - 1:
+            next_start = words[original_idx + 1][0]
+            if next_start - w_end > 0.4:
+                has_pause = True
+                
+        if ends_with_punc or has_pause:
+            best_end = w_end
+            break
+
+    if best_end is not None:
+        return actual_start, best_end
+    else:
+        # If no logical end found, use the last valid word
+        return actual_start, valid_end_words[-1][2]
 
 # Compact hook prompt — ~150 tokens vs ~350 previously
 HOOK_GENERATOR_PROMPT = """Viral copywriter. Generate hooks for this clip.
@@ -98,6 +187,44 @@ class GroqAnalyzer:
         # Hard truncate if still too long
         return text[:max_chars]
 
+    async def _call_groq_with_retry(
+        self,
+        model: str,
+        messages: list,
+        temperature: float,
+        max_tokens: int,
+        retries: int = 5,
+    ) -> str:
+        """Call Groq API with exponential backoff on rate limits or payload errors."""
+        delay = 5.0
+        for attempt in range(retries):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                err_str = str(e)
+                is_rate_limit = any(
+                    term in err_str.lower()
+                    for term in ["rate_limit_exceeded", "429", "413", "payload too large", "too many requests", "limit exceeded"]
+                )
+                
+                if is_rate_limit and attempt < retries - 1:
+                    logger.warning(
+                        f"Groq API rate limit or payload size issue on {model} (Attempt {attempt + 1}/{retries}): {err_str}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= 2.0
+                else:
+                    logger.error(f"Groq API call failed permanently on attempt {attempt + 1}: {e}")
+                    raise
+        raise RuntimeError("Failed to get response from Groq API after maximum retries.")
+
     async def detect_viral_moments(
         self,
         transcript_chunks: list[dict],
@@ -111,14 +238,18 @@ class GroqAnalyzer:
         """
         all_moments = []
 
-        # Larger batches = fewer API calls = fewer tokens on prompt overhead
-        max_chars = 14000
+        # Reduced to 5000 chars to stay safely within Groq TPM limits
+        max_chars = 5000
         batches = self._split_transcript_into_batches(transcript_chunks, max_chars)
         clips_per_batch = max(2, num_clips // len(batches) + 1)
 
         logger.info(f"Analyzing {len(batches)} batches with {self.detection_model} for {clips_per_batch} clips/batch")
 
         for batch_idx, batch in enumerate(batches):
+            if batch_idx > 0:
+                logger.info("Sleeping for 2.0 seconds between batches to avoid Groq rate limit bursting...")
+                await asyncio.sleep(2.0)
+
             batch_text = "\n".join(
                 f"[{c['start']:.2f}] {self._compress_chunk_text(c['text'])}"
                 for c in batch
@@ -133,14 +264,13 @@ class GroqAnalyzer:
 
             raw = ""
             try:
-                response = await self.client.chat.completions.create(
+                raw = await self._call_groq_with_retry(
                     model=self.detection_model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
-                    max_tokens=1024,  # Was 4096 — JSON for 3 clips needs <500 tokens
+                    max_tokens=1024,
                 )
 
-                raw = response.choices[0].message.content
                 clean = self._clean_json_response(raw)
                 moments_data = json.loads(clean)
 
@@ -154,7 +284,7 @@ class GroqAnalyzer:
                         hook_words=m.get("hook_words", ""),
                         scores=m.get("scores", {}),
                     )
-                    if moment.duration >= min_duration and moment.score > 0:
+                    if min_duration <= moment.duration <= (max_duration + 30) and moment.score > 0:
                         all_moments.append(moment)
                         batch_valid += 1
 
@@ -215,13 +345,12 @@ class GroqAnalyzer:
 
         raw = ""
         try:
-            response = await self.client.chat.completions.create(
+            raw = await self._call_groq_with_retry(
                 model=self.hook_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
-                max_tokens=512,  # Was 1024
+                max_tokens=512,
             )
-            raw = response.choices[0].message.content
             clean = self._clean_json_response(raw)
             data = json.loads(clean)
             return HookContent(

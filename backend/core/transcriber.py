@@ -38,6 +38,14 @@ class Transcript:
     segments: list[TranscriptSegment]
     full_text: str
 
+    @property
+    def all_words(self) -> list[WordTimestamp]:
+        """Flatten and return all word timestamps from all segments."""
+        words = []
+        for seg in self.segments:
+            words.extend(seg.words)
+        return words
+
     def to_dict(self) -> dict:
         return {
             "language": self.language,

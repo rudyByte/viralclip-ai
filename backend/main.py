@@ -1,3 +1,17 @@
+import ssl
+
+# Disable strict OpenSSL 3.0+ check for SSL: UNEXPECTED_EOF_WHILE_READING globally
+try:
+    orig_create_default_context = ssl.create_default_context
+    def patched_create_default_context(*args, **kwargs):
+        context = orig_create_default_context(*args, **kwargs)
+        op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
+        context.options |= op_ignore
+        return context
+    ssl.create_default_context = patched_create_default_context
+except Exception:
+    pass
+
 import logging
 import asyncio
 import shutil
@@ -58,6 +72,7 @@ async def queue_worker_loop():
                 num_c = next_job.num_clips
                 cap_style = next_job.caption_style
                 bg_type = next_job.background_type
+                layout_temp = getattr(next_job, "layout_template", "split_50_50") or "split_50_50"
 
                 # Update state before running pipeline to avoid double-processing
                 from sqlalchemy import update
@@ -77,7 +92,8 @@ async def queue_worker_loop():
                     clip_max_duration=max_dur,
                     num_clips=num_c,
                     caption_style=cap_style,
-                    background_type=bg_type
+                    background_type=bg_type,
+                    layout_template=layout_temp
                 )
             )
             logger.info(f"Launched pipeline task for job: {job_id}")
@@ -195,9 +211,17 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
+# Allow all Vercel deployments (*.vercel.app), local dev, and any configured frontend URL
+ALLOWED_ORIGINS = [
+    settings.frontend_url,
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://frontend-six-navy-96.vercel.app",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://localhost:3000", "http://localhost:5173"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",  # all Vercel preview URLs
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

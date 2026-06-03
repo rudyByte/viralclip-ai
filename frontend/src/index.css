@@ -194,3 +194,25 @@ h1, h2, h3, h4, h5, h6 { font-family: 'Outfit', 'Inter', sans-serif; font-weight
          border border-white/[0.06]
          bg-gradient-card;
 }
+
+/* ── Scrollbar thin utility ─────────────────────────────────────── */
+.scrollbar-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #252540; border-radius: 2px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #4338ca; }
+
+/* ── Keyframe Animations ────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; box-shadow: 0 0 20px rgba(99,102,241,0.3); }
+  50%       { opacity: 0.8; box-shadow: 0 0 40px rgba(99,102,241,0.6); }
+}
+
+/* ── Animation utilities (not in Tailwind) ──────────────────────── */
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}

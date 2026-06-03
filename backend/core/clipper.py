@@ -54,9 +54,11 @@ class Clipper:
         output_path: str,
         face_x_ratio: float = 0.5,
         face_y_ratio: float = 0.35,
+        target_height: int = 1920,
     ) -> str:
         """
-        Crop video to 9:16 vertical format centered on speaker.
+        Crop video to correct vertical format aspect ratio centered on speaker.
+        target_height: height of the main video in the layout (e.g. 1920, 1152, 960, 1344)
         face_x_ratio: horizontal center of face (0-1, 0.5 = center)
         face_y_ratio: vertical center of face (0-1)
         """
@@ -65,26 +67,27 @@ class Clipper:
         src_w = probe["width"]
         src_h = probe["height"]
 
-        # Calculate crop dimensions for 9:16
-        # Crop width = source_height * (9/16)
-        crop_w = int(src_h * 9 / 16)
+        # Calculate crop dimensions matching target aspect ratio
+        target_aspect = self.export_width / target_height
+        crop_w = int(src_h * target_aspect)
         crop_h = src_h
 
         if crop_w > src_w:
-            # Portrait video already — just scale
+            # Source video too narrow for target aspect — fit width and crop height
             crop_w = src_w
-            crop_h = int(src_w * 16 / 9)
+            crop_h = int(src_w / target_aspect)
 
         # Center crop on detected face position
         crop_x = int(src_w * face_x_ratio - crop_w / 2)
         crop_x = max(0, min(crop_x, src_w - crop_w))
 
-        crop_y = 0  # Start from top for portrait crops
+        # Center crop vertically as well
+        crop_y = int(src_h * face_y_ratio - crop_h / 2)
+        crop_y = max(0, min(crop_y, src_h - crop_h))
 
         vf = (
             f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y},"
-            f"scale={self.export_width}:{self.export_height}:force_original_aspect_ratio=decrease,"
-            f"pad={self.export_width}:{self.export_height}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"scale={self.export_width}:{target_height},"
             f"fps={self.fps}"
         )
 
@@ -96,7 +99,7 @@ class Clipper:
             output_path,
         ]
         self._run_ffmpeg(cmd)
-        logger.info(f"Cropped to vertical: {output_path}")
+        logger.info(f"Cropped to vertical (height={target_height}): {output_path}")
         return output_path
 
     def crop_to_vertical_smart(
@@ -104,6 +107,7 @@ class Clipper:
         video_path: str,
         output_path: str,
         face_positions: Optional[list[tuple]] = None,
+        target_height: int = 1920,
     ) -> str:
         """
         Smart crop using face position timeline.
@@ -111,13 +115,13 @@ class Clipper:
         Falls back to center crop if no face data.
         """
         if not face_positions:
-            return self.crop_to_vertical(video_path, output_path)
+            return self.crop_to_vertical(video_path, output_path, target_height=target_height)
 
         # Use average face position for stable cropping
         avg_x = sum(p[1] for p in face_positions) / len(face_positions)
         avg_y = sum(p[2] for p in face_positions) / len(face_positions)
 
-        return self.crop_to_vertical(video_path, output_path, avg_x, avg_y)
+        return self.crop_to_vertical(video_path, output_path, avg_x, avg_y, target_height=target_height)
 
     def merge_audio_video(self, video_path: str, audio_path: str, output_path: str) -> str:
         """Replace audio track on a video."""

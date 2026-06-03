@@ -61,6 +61,7 @@ async def run_pipeline(
     num_clips: int = 5,
     caption_style: str = "hormozi",
     background_type: str = "subway",
+    layout_template: str = "split_50_50",
 ):
     """
     Full ViralClip AI processing pipeline with checkpoint-based resume.
@@ -76,6 +77,8 @@ async def run_pipeline(
     export_dir = Path(settings.export_dir) / job_id
     export_dir.mkdir(parents=True, exist_ok=True)
 
+    yt_title = "YouTube Video"  # Safe default
+
     try:
         # ── Load existing job record for checkpoint data ───────────────
         job = await _get_job(job_id)
@@ -84,7 +87,59 @@ async def run_pipeline(
         video_path = job.video_path if job else None
         audio_path = job.audio_path if job else None
 
-        if video_path and audio_path and os.path.exists(video_path) and os.path.exists(audio_path):
+        # Check if files already exist on disk (for resuming interrupted downloads)
+        expected_video_path = temp_dir / f"{job_id}_video.mp4"
+        expected_audio_path = temp_dir / f"{job_id}_audio.wav"
+
+        if expected_video_path.exists():
+            logger.info(f"[{job_id}] ✓ Video file already found on disk at {expected_video_path}. Skipping download.")
+            video_path = str(expected_video_path)
+            
+            if not expected_audio_path.exists():
+                logger.info(f"[{job_id}] Audio file missing. Extracting from existing video...")
+                await update_job_status(job_id, "downloading", 10, "Extracting audio from existing download...")
+                downloader = Downloader(str(temp_dir))
+                await asyncio.get_running_loop().run_in_executor(
+                    None, downloader._extract_audio, video_path, str(expected_audio_path)
+                )
+            
+            audio_path = str(expected_audio_path)
+            
+            # Update video info in DB if missing
+            if not job or not job.title:
+                try:
+                    downloader = Downloader(str(temp_dir))
+                    info = await downloader.get_video_info_async(youtube_url)
+                    async with AsyncSessionLocal() as db:
+                        from sqlalchemy import update as sq_update
+                        await db.execute(
+                            sq_update(Job).where(Job.id == job_id).values(
+                                title=info.title,
+                                channel=info.channel,
+                                thumbnail_url=info.thumbnail,
+                                duration_seconds=info.duration,
+                                video_path=video_path,
+                                audio_path=audio_path,
+                            )
+                        )
+                        await db.commit()
+                    yt_title = info.title
+                except Exception as ex:
+                    logger.warning(f"[{job_id}] Failed to fetch info for cached download: {ex}")
+                    yt_title = "YouTube Video"
+            else:
+                async with AsyncSessionLocal() as db:
+                    from sqlalchemy import update as sq_update
+                    await db.execute(
+                        sq_update(Job).where(Job.id == job_id).values(
+                            video_path=video_path, audio_path=audio_path
+                        )
+                    )
+                    await db.commit()
+                yt_title = job.title or "YouTube Video"
+            
+            await update_job_status(job_id, "downloading", 20, "Video and audio loaded from disk, resuming...")
+        elif video_path and audio_path and os.path.exists(video_path) and os.path.exists(audio_path):
             logger.info(f"[{job_id}] ✓ Step 1 checkpoint: video/audio already on disk, skipping download.")
             await update_job_status(job_id, "downloading", 20, "Video already downloaded, resuming...")
             yt_title = job.title or "YouTube Video"
@@ -280,6 +335,18 @@ async def run_pipeline(
             clip_id = str(uuid.uuid4())
 
             try:
+                # ── Logical boundary adjustment ───────────────────────
+                from core.analyzer import adjust_clip_boundaries
+                adjusted_start, adjusted_end = adjust_clip_boundaries(
+                    start_time=moment.start_time,
+                    end_time=moment.end_time,
+                    transcript_words=transcript.all_words,
+                    min_duration=clip_min_duration,
+                    max_duration=clip_max_duration,
+                )
+                moment.start_time = adjusted_start
+                moment.end_time = adjusted_end
+
                 # Extract raw clip
                 raw_path = str(temp_dir / f"clip_{i}_raw.mp4")
                 await clipper.extract_clip_async(video_path, moment.start_time, moment.end_time, raw_path)
@@ -287,21 +354,36 @@ async def run_pipeline(
                 # Face track for smart crop
                 face_positions = await face_tracker.analyze_video_async(raw_path, sample_interval=2.0)
 
-                # Crop to vertical 9:16
-                cropped_path = str(temp_dir / f"clip_{i}_cropped.mp4")
-                await clipper.crop_to_vertical_async(raw_path, cropped_path, face_positions)
+                # Crop to vertical using layout template target height
+                if layout_template == "split_50_50":
+                    target_h = 960
+                elif layout_template == "split_60_40":
+                    target_h = 1152
+                elif layout_template == "split_70_30":
+                    target_h = 1344
+                else:  # no_gameplay or single
+                    target_h = 1920
 
-                # Generate captions
+                cropped_path = str(temp_dir / f"clip_{i}_cropped.mp4")
+                await clipper.crop_to_vertical_async(raw_path, cropped_path, face_positions, target_height=target_h)
+
+                # Generate captions (supporting Hindi/Gujarati/Indic language font fallbacks)
                 words = transcript.get_words_in_range(moment.start_time, moment.end_time)
                 ass_path = str(temp_dir / f"clip_{i}_captions.ass")
-                await caption_gen.generate_ass_file_async(words, ass_path, caption_style, moment.start_time)
+                lang = getattr(transcript, "language", "en")
+                await caption_gen.generate_ass_file_async(
+                    words, ass_path, caption_style, moment.start_time,
+                    language=lang, crop_height=target_h
+                )
 
                 captioned_path = str(temp_dir / f"clip_{i}_captioned.mp4")
                 await caption_gen.burn_captions_async(cropped_path, ass_path, captioned_path)
 
-                # Add gaming background
-                export_path = str(export_dir / f"clip_{i+1}_{int(moment.score)}.mp4")
-                await bg_mixer.mix_with_background_async(captioned_path, export_path, background_type)
+                # Add gaming background mixed with customized template heights
+                export_path = str(export_dir / f"clip_{i+1}_score{int(moment.score)}.mp4")
+                await bg_mixer.mix_with_background_async(
+                    captioned_path, export_path, background_type, layout_template=layout_template
+                )
 
                 # Generate hooks with quality model
                 clip_text = " ".join(w.word for w in words)
@@ -335,6 +417,7 @@ async def run_pipeline(
                         export_path=export_path,
                         caption_style=caption_style,
                         background_type=background_type,
+                        layout_template=layout_template,
                         status="done",
                     )
                     db.add(clip)
@@ -360,6 +443,12 @@ async def run_pipeline(
                 continue
 
         # ── Step 5: Done ─────────────────────────────────────────────
+        if not clip_records:
+            raise RuntimeError(
+                "No clips were successfully generated. This can occur if the Groq rate limits are exceeded, "
+                "or if no viral moments were detected in the transcript. Please try again."
+            )
+
         await update_job_status(job_id, "done", 100, f"Complete! {len(clip_records)} clips ready.")
         logger.info(f"[{job_id}] Pipeline complete. {len(clip_records)} clips exported.")
 
@@ -367,3 +456,110 @@ async def run_pipeline(
         logger.error(f"[{job_id}] Pipeline failed: {e}", exc_info=True)
         await update_job_status(job_id, "error", 0, "", str(e))
         raise
+
+
+async def regenerate_single_clip(clip_id: str):
+    """Regenerate a single clip's video file with new styles, templates, or background."""
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select, update
+        clip_result = await db.execute(select(Clip).where(Clip.id == clip_id))
+        clip = clip_result.scalar_one_or_none()
+        if not clip:
+            logger.error(f"Clip {clip_id} not found for regeneration.")
+            return
+            
+        job_result = await db.execute(select(Job).where(Job.id == clip.job_id))
+        job = job_result.scalar_one_or_none()
+        if not job:
+            logger.error(f"Job {clip.job_id} not found for clip {clip_id} regeneration.")
+            return
+
+        # Mark clip as processing
+        await db.execute(update(Clip).where(Clip.id == clip_id).values(status="processing"))
+        await db.commit()
+
+    job_id = job.id
+    temp_dir = Path(settings.temp_dir) / job_id
+    export_dir = Path(settings.export_dir) / job_id
+
+    try:
+        from core.clipper import Clipper
+        from core.caption_generator import CaptionGenerator
+        from core.background_mixer import BackgroundMixer
+        from utils.face_tracker import FaceTracker
+        from core.transcriber import Transcriber
+        
+        clipper = Clipper(
+            str(temp_dir),
+            export_width=settings.export_width,
+            export_height=settings.export_height,
+            fps=settings.export_fps,
+        )
+        face_tracker = FaceTracker()
+        caption_gen = CaptionGenerator(
+            str(temp_dir),
+            video_width=settings.export_width,
+            video_height=settings.export_height,
+        )
+        bg_mixer = BackgroundMixer(settings.assets_dir)
+
+        # Load transcript to extract word timestamps
+        transcript_path = job.transcript_path or str(temp_dir / "transcript.json")
+        transcript = Transcriber.load_transcript(transcript_path)
+        words = transcript.get_words_in_range(clip.start_time, clip.end_time)
+
+        # 1. Re-crop using face tracking average & target template height
+        face_positions = await face_tracker.analyze_video_async(clip.raw_clip_path, sample_interval=2.0)
+        
+        layout = getattr(clip, "layout_template", "split_50_50") or "split_50_50"
+        if layout == "split_50_50":
+            target_h = 960
+        elif layout == "split_60_40":
+            target_h = 1152
+        elif layout == "split_70_30":
+            target_h = 1344
+        else:  # no_gameplay or single
+            target_h = 1920
+
+        cropped_path = str(temp_dir / f"clip_{clip.clip_index}_cropped.mp4")
+        await clipper.crop_to_vertical_async(
+            clip.raw_clip_path, cropped_path, face_positions, target_height=target_h
+        )
+
+        # 2. Burn captions
+        ass_path = str(temp_dir / f"clip_{clip.clip_index}_captions.ass")
+        lang = getattr(transcript, "language", "en")
+        await caption_gen.generate_ass_file_async(
+            words, ass_path, clip.caption_style, clip.start_time,
+            language=lang, crop_height=target_h
+        )
+
+        captioned_path = str(temp_dir / f"clip_{clip.clip_index}_captioned.mp4")
+        await caption_gen.burn_captions_async(cropped_path, ass_path, captioned_path)
+
+        # 3. Add background / Layout Mix
+        export_path = str(export_dir / f"clip_{clip.clip_index+1}_score{clip.virality_score}.mp4")
+        await bg_mixer.mix_with_background_async(
+            captioned_path, export_path, clip.background_type, layout_template=layout
+        )
+
+        # Update database
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(Clip)
+                .where(Clip.id == clip_id)
+                .values(
+                    status="done",
+                    cropped_clip_path=cropped_path,
+                    captioned_clip_path=captioned_path,
+                    export_path=export_path
+                )
+            )
+            await db.commit()
+        logger.info(f"Successfully regenerated clip {clip_id}")
+
+    except Exception as e:
+        logger.error(f"Failed to regenerate clip {clip_id}: {e}", exc_info=True)
+        async with AsyncSessionLocal() as db:
+            await db.execute(update(Clip).where(Clip.id == clip_id).values(status="error"))
+            await db.commit()

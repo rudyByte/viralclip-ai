@@ -30,12 +30,13 @@ class BackgroundMixer:
         background_type: str = "subway",
         clip_volume: float = 1.0,
         gameplay_volume: float = 0.15,
+        layout_template: str = "split_50_50",
     ) -> str:
         """
         Create split-screen: main clip (top) + gameplay (bottom).
         If no gameplay footage found, uses animated gradient background.
         """
-        if background_type == "none":
+        if background_type == "none" or layout_template == "no_gameplay":
             return self._add_plain_background(clip_path, output_path)
 
         gameplay_path = self._get_gameplay_clip(background_type)
@@ -47,6 +48,17 @@ class BackgroundMixer:
         # Get main clip duration
         clip_duration = self._get_duration(clip_path)
 
+        # Determine main video height (main_h) and gameplay video height (gameplay_h)
+        if layout_template == "split_60_40":
+            main_h = 1152
+            gameplay_h = 768
+        elif layout_template == "split_70_30":
+            main_h = 1344
+            gameplay_h = 576
+        else:  # split_50_50 or default
+            main_h = 960
+            gameplay_h = 960
+
         return self._stack_videos(
             clip_path=clip_path,
             gameplay_path=gameplay_path,
@@ -54,6 +66,8 @@ class BackgroundMixer:
             clip_duration=clip_duration,
             clip_volume=clip_volume,
             gameplay_volume=gameplay_volume,
+            main_h=main_h,
+            gameplay_h=gameplay_h,
         )
 
     def _has_audio(self, video_path: str) -> bool:
@@ -75,28 +89,29 @@ class BackgroundMixer:
         clip_duration: float,
         clip_volume: float,
         gameplay_volume: float,
+        main_h: int = 960,
+        gameplay_h: int = 960,
     ) -> str:
         """
-        Stack main clip (top 960px) + gameplay (bottom 960px).
+        Stack main clip (top main_h) + gameplay (bottom gameplay_h).
         Loops gameplay if shorter than clip. Trims if longer.
         """
         w = self.export_width
-        half_h = self.half_height
         has_gameplay_audio = self._has_audio(gameplay_path)
+        has_main_audio = self._has_audio(clip_path)
 
         # Filter complex:
-        # [0:v] → scale + pad to top half (1080x960)
-        # [1:v] → scale + random seek + loop to bottom half (1080x960)
+        # [0:v] → scale directly to top portion (1080xmain_h) since it’s pre-cropped
+        # [1:v] → scale and crop-to-fill bottom portion (1080xgameplay_h)
         # Stack vertically → 1080x1920
         # Mix audio: clip at full vol, gameplay muted/low if gameplay has audio
 
-        if has_gameplay_audio:
+        if has_gameplay_audio and has_main_audio:
             filter_complex = (
-                f"[0:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
-                f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black[top];"
+                f"[0:v]scale={w}:{main_h}[top];"
 
-                f"[1:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
-                f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black,"
+                f"[1:v]scale={w}:{gameplay_h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{gameplay_h},"
                 f"trim=duration={clip_duration},setpts=PTS-STARTPTS[bot];"
 
                 f"[top][bot]vstack=inputs=2[v];"
@@ -106,18 +121,32 @@ class BackgroundMixer:
                 f"[main_a][game_a]amix=inputs=2:normalize=0[a]"
             )
             map_audio = "[a]"
-        else:
+        elif has_main_audio:
+            # Gameplay has no audio — just mix gameplay visuals with clip audio only
             filter_complex = (
-                f"[0:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
-                f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black[top];"
+                f"[0:v]scale={w}:{main_h}[top];"
 
-                f"[1:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
-                f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black,"
+                f"[1:v]scale={w}:{gameplay_h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{gameplay_h},"
                 f"trim=duration={clip_duration},setpts=PTS-STARTPTS[bot];"
 
                 f"[top][bot]vstack=inputs=2[v]"
             )
             map_audio = "0:a"
+        else:
+            # Neither has audio — add silent track
+            filter_complex = (
+                f"[0:v]scale={w}:{main_h}[top];"
+
+                f"[1:v]scale={w}:{gameplay_h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{gameplay_h},"
+                f"trim=duration={clip_duration},setpts=PTS-STARTPTS[bot];"
+
+                f"[top][bot]vstack=inputs=2[v];"
+
+                f"anullsrc=r=44100:cl=stereo[a]"
+            )
+            map_audio = "[a]"
 
         cmd = [
             "ffmpeg", "-y",
@@ -137,7 +166,7 @@ class BackgroundMixer:
             # Fall back to plain background
             return self._add_plain_background(clip_path, output_path)
 
-        logger.info(f"Background mixed: {output_path}")
+        logger.info(f"Background mixed (template heights: {main_h}/{gameplay_h}): {output_path}")
         return output_path
 
     def _add_plain_background(self, clip_path: str, output_path: str) -> str:
@@ -155,7 +184,10 @@ class BackgroundMixer:
             "-c:a", "aac", "-b:a", "192k",
             output_path,
         ]
-        subprocess.run(cmd, capture_output=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"Plain background fallback failed: {result.stderr[-500:]}")
+            raise RuntimeError(f"FFmpeg plain background failed: {result.stderr[-300:]}")
         return output_path
 
     def _add_gradient_background(self, clip_path: str, output_path: str) -> str:

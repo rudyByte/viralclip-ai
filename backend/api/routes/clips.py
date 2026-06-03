@@ -9,7 +9,7 @@ POST   /api/clips/{clip_id}/regenerate — regenerate with new settings
 import logging
 import json
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -49,6 +49,7 @@ def clip_to_dict(clip: Clip) -> dict:
         "score_breakdown": scorer.get_score_breakdown(scores),
         "caption_style": clip.caption_style,
         "background_type": clip.background_type,
+        "layout_template": getattr(clip, "layout_template", "split_50_50") or "split_50_50",
         "status": clip.status,
         "has_export": clip.export_path is not None and Path(clip.export_path or "").exists(),
         "created_at": clip.created_at.isoformat() if clip.created_at else "",
@@ -132,15 +133,17 @@ async def get_clip_hooks(clip_id: str, db: AsyncSession = Depends(get_db)):
 class RegenerateRequest(BaseModel):
     caption_style: Optional[str] = None
     background_type: Optional[str] = None
+    layout_template: Optional[str] = None
 
 
 @router.post("/{clip_id}/regenerate")
 async def regenerate_clip(
     clip_id: str,
     req: RegenerateRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue clip for regeneration with different caption/background settings."""
+    """Queue clip for regeneration with different caption/background/layout settings."""
     result = await db.execute(select(Clip).where(Clip.id == clip_id))
     clip = result.scalar_one_or_none()
     if not clip:
@@ -153,9 +156,15 @@ async def regenerate_clip(
         updates["caption_style"] = req.caption_style
     if req.background_type:
         updates["background_type"] = req.background_type
+    if req.layout_template:
+        updates["layout_template"] = req.layout_template
 
     await db.execute(update(Clip).where(Clip.id == clip_id).values(**updates))
     await db.commit()
+
+    # Trigger background regeneration task
+    from core.pipeline import regenerate_single_clip
+    background_tasks.add_task(regenerate_single_clip, clip_id)
 
     return {"message": "Clip queued for regeneration", "clip_id": clip_id}
 

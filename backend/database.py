@@ -1,7 +1,7 @@
 """
 ViralClip AI — Database Models (SQLAlchemy + SQLite)
 """
-from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, Boolean
+from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, Boolean, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from datetime import datetime
@@ -42,6 +42,7 @@ class Job(Base):
     num_clips = Column(Integer, default=5)
     caption_style = Column(String, default="hormozi")
     background_type = Column(String, default="subway")
+    layout_template = Column(String, default="split_50_50")
 
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
@@ -80,6 +81,7 @@ class Clip(Base):
     # Settings
     caption_style = Column(String, default="hormozi")
     background_type = Column(String, default="subway")
+    layout_template = Column(String, default="split_50_50")
     status = Column(String, default="pending")  # pending|processing|done|error
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -110,9 +112,39 @@ class AppSettings(Base):
 
 
 async def init_db():
-    """Initialize database tables."""
+    """Initialize database tables and add missing columns for backward compatibility."""
+    import logging
+    db_logger = logging.getLogger("database")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+    # Dynamically check and add layout_template columns if missing
+    async with AsyncSessionLocal() as session:
+        # Check jobs table
+        try:
+            await session.execute(text("SELECT layout_template FROM jobs LIMIT 1"))
+        except Exception:
+            await session.rollback()
+            try:
+                await session.execute(text("ALTER TABLE jobs ADD COLUMN layout_template VARCHAR DEFAULT 'split_50_50'"))
+                await session.commit()
+                db_logger.info("Added column 'layout_template' to 'jobs' table.")
+            except Exception as e:
+                db_logger.error(f"Failed to add 'layout_template' to 'jobs': {e}")
+                await session.rollback()
+
+        # Check clips table
+        try:
+            await session.execute(text("SELECT layout_template FROM clips LIMIT 1"))
+        except Exception:
+            await session.rollback()
+            try:
+                await session.execute(text("ALTER TABLE clips ADD COLUMN layout_template VARCHAR DEFAULT 'split_50_50'"))
+                await session.commit()
+                db_logger.info("Added column 'layout_template' to 'clips' table.")
+            except Exception as e:
+                db_logger.error(f"Failed to add 'layout_template' to 'clips': {e}")
+                await session.rollback()
 
 
 async def get_db():

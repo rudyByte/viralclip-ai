@@ -24,6 +24,13 @@ const BACKGROUND_TYPES = [
   { id: 'none', name: 'No Gameplay Overlay', desc: 'Keep original video crop centered without gaming overlay.', image: '❌' },
 ]
 
+const LAYOUT_TEMPLATES = [
+  { id: 'split_50_50', name: 'Split Screen (50/50)', desc: 'Equal split, perfect for standard dual videos.', badge: 'Standard' },
+  { id: 'split_60_40', name: 'Split Screen (60/40)', desc: 'Larger main video (60%), smaller gameplay (40%).', badge: 'Focus' },
+  { id: 'split_70_30', name: 'Split Screen (70/30)', desc: 'Highly prominent main video (70%), tiny gameplay (30%).', badge: 'Speaker' },
+  { id: 'no_gameplay', name: 'Full Portrait 9:16', desc: 'Full screen crop of the main video, no gameplay background.', badge: 'Classic' },
+]
+
 export default function CreateShort() {
   const navigate = useNavigate()
   const [url, setUrl] = useState('')
@@ -32,6 +39,7 @@ export default function CreateShort() {
   const [numClips, setNumClips] = useState(5)
   const [captionStyle, setCaptionStyle] = useState('hormozi')
   const [backgroundType, setBackgroundType] = useState('subway')
+  const [layoutTemplate, setLayoutTemplate] = useState('split_50_50')
   const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async (e) => {
@@ -61,11 +69,13 @@ export default function CreateShort() {
         clip_max_duration: parseInt(maxDuration),
         num_clips: parseInt(numClips),
         caption_style: captionStyle,
-        background_type: backgroundType
+        background_type: backgroundType,
+        layout_template: layoutTemplate
       })
       
       toast.success(response.message || 'Job(s) queued successfully!')
-      // Redirect to the first job's results page
+      // Save to localStorage so user can return later from any device
+      saveToHistory(response.job_id, urls[0])
       navigate(`/results/${response.job_id}`)
     } catch (err) {
       console.error(err)
@@ -75,13 +85,23 @@ export default function CreateShort() {
     }
   }
 
+  // Save to localStorage for fire-and-forget history
+  const saveToHistory = (jobId, jobUrl) => {
+    try {
+      const history = JSON.parse(localStorage.getItem('viralclip_jobs') || '[]')
+      const filtered = history.filter(j => j.id !== jobId)
+      filtered.unshift({ id: jobId, title: jobUrl, savedAt: Date.now() })
+      localStorage.setItem('viralclip_jobs', JSON.stringify(filtered.slice(0, 20)))
+    } catch (_) {}
+  }
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="p-8 max-w-4xl mx-auto space-y-8"
+      className="p-4 md:p-8 max-w-4xl mx-auto space-y-6 md:space-y-8"
     >
       {/* Back link */}
       <button
@@ -107,12 +127,12 @@ export default function CreateShort() {
         
         {/* Step 1: Input URL */}
         <div className="glass rounded-2xl p-6 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <label className="block text-sm font-bold text-white uppercase tracking-wider">
               1. Paste YouTube URL(s)
             </label>
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              Separate multiple links with commas or newlines
+              Separate multiple links with comlines or newlines
             </span>
           </div>
           <div className="relative">
@@ -194,7 +214,7 @@ export default function CreateShort() {
             <span>3. Subtitle Font & Animation Style</span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
             {CAPTION_STYLES.map(style => (
               <div
                 key={style.id}
@@ -226,7 +246,7 @@ export default function CreateShort() {
             <span>4. Gaming Background Overlay</span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
             {BACKGROUND_TYPES.map(bg => (
               <div
                 key={bg.id}
@@ -249,12 +269,44 @@ export default function CreateShort() {
           </div>
         </div>
 
+        {/* Step 5: Layout Templates */}
+        <div className="glass rounded-2xl p-6 space-y-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-white uppercase tracking-wider">
+            <Sliders className="w-5 h-5 text-brand-400" />
+            <span>5. Layout Aspect Ratio & Template</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
+            {LAYOUT_TEMPLATES.map(tmpl => (
+              <div
+                key={tmpl.id}
+                onClick={() => !submitting && setLayoutTemplate(tmpl.id)}
+                className={`p-4 rounded-xl border cursor-pointer flex flex-col justify-between h-28 transition-all ${
+                  layoutTemplate === tmpl.id
+                    ? 'bg-brand-600/10 border-brand-500 shadow-[0_0_15px_rgba(99,102,241,0.15)]'
+                    : 'bg-surface-900/50 border-white/[0.06] hover:border-white/20'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-white text-sm">{tmpl.name}</h4>
+                    <span className="text-[10px] uppercase font-bold bg-white/10 px-2 py-0.5 rounded-full text-brand-400">
+                      {tmpl.badge}
+                    </span>
+                  </div>
+                  <p className="text-slate-400 text-xs mt-2 leading-relaxed">{tmpl.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Submit */}
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-stretch sm:justify-end">
           <button
             type="submit"
             disabled={submitting}
-            className="btn-primary px-8 py-4 flex items-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-primary w-full sm:w-auto px-8 py-4 flex items-center justify-center gap-2 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? (
               <>

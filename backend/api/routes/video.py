@@ -34,6 +34,7 @@ class ProcessRequest(BaseModel):
     num_clips: int = 5
     caption_style: str = "hormozi"
     background_type: str = "subway"
+    layout_template: str = "split_50_50"
 
 
 class JobResponse(BaseModel):
@@ -50,6 +51,7 @@ class JobResponse(BaseModel):
     created_at: str
     completed_at: Optional[str]
     clip_count: int = 0
+    layout_template: Optional[str] = "split_50_50"
 
 
 def job_to_response(job: Job, clip_count: int = 0) -> JobResponse:
@@ -67,6 +69,7 @@ def job_to_response(job: Job, clip_count: int = 0) -> JobResponse:
         created_at=job.created_at.isoformat() if job.created_at else "",
         completed_at=job.completed_at.isoformat() if job.completed_at else None,
         clip_count=clip_count,
+        layout_template=job.layout_template,
     )
 
 
@@ -93,6 +96,7 @@ async def process_video(
             num_clips=req.num_clips,
             caption_style=req.caption_style,
             background_type=req.background_type,
+            layout_template=req.layout_template,
             created_at=datetime.utcnow(),
         )
         db.add(job)
@@ -145,7 +149,7 @@ async def list_jobs(
             select(Clip).where(Clip.job_id == job.id, Clip.status == "done")
         )
         clip_count = len(clips_result.scalars().all())
-        job_responses.append(job_to_response(job, clip_count).dict())
+        job_responses.append(job_to_response(job, clip_count).model_dump())
 
     return {"jobs": job_responses, "total": len(job_responses)}
 
