@@ -145,8 +145,10 @@ class Downloader:
 
     def get_video_info(self, url: str) -> VideoInfo:
         """Fetch video metadata without downloading."""
+        # Use 'best' for info extraction — format restriction only needed during download.
         ydl_opts = self._get_ydl_opts({
             "skip_download": True,
+            "format": "best",
         })
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
