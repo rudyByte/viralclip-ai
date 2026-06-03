@@ -35,6 +35,8 @@ class ProcessRequest(BaseModel):
     caption_style: str = "hormozi"
     background_type: str = "subway"
     layout_template: str = "split_50_50"
+    resolution: str = "1080p"
+    cookies: Optional[str] = None
 
 
 class JobResponse(BaseModel):
@@ -52,6 +54,7 @@ class JobResponse(BaseModel):
     completed_at: Optional[str]
     clip_count: int = 0
     layout_template: Optional[str] = "split_50_50"
+    resolution: Optional[str] = "1080p"
 
 
 def job_to_response(job: Job, clip_count: int = 0) -> JobResponse:
@@ -70,6 +73,7 @@ def job_to_response(job: Job, clip_count: int = 0) -> JobResponse:
         completed_at=job.completed_at.isoformat() if job.completed_at else None,
         clip_count=clip_count,
         layout_template=job.layout_template,
+        resolution=job.resolution,
     )
 
 
@@ -97,6 +101,8 @@ async def process_video(
             caption_style=req.caption_style,
             background_type=req.background_type,
             layout_template=req.layout_template,
+            resolution=req.resolution,
+            cookies=req.cookies,
             created_at=datetime.utcnow(),
         )
         db.add(job)

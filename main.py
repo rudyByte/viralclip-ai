@@ -73,6 +73,8 @@ async def queue_worker_loop():
                 cap_style = next_job.caption_style
                 bg_type = next_job.background_type
                 layout_temp = getattr(next_job, "layout_template", "split_50_50") or "split_50_50"
+                resolution = getattr(next_job, "resolution", "1080p") or "1080p"
+                cookies = getattr(next_job, "cookies", None)
 
                 # Update state before running pipeline to avoid double-processing
                 from sqlalchemy import update
@@ -93,7 +95,9 @@ async def queue_worker_loop():
                     num_clips=num_c,
                     caption_style=cap_style,
                     background_type=bg_type,
-                    layout_template=layout_temp
+                    layout_template=layout_temp,
+                    resolution=resolution,
+                    cookies=cookies,
                 )
             )
             logger.info(f"Launched pipeline task for job: {job_id}")

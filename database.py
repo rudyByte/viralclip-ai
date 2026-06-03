@@ -43,6 +43,8 @@ class Job(Base):
     caption_style = Column(String, default="hormozi")
     background_type = Column(String, default="subway")
     layout_template = Column(String, default="split_50_50")
+    resolution = Column(String, default="1080p")
+    cookies = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
@@ -118,9 +120,9 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         
-    # Dynamically check and add layout_template columns if missing
+    # Dynamically check and add missing columns if they don't exist
     async with AsyncSessionLocal() as session:
-        # Check jobs table
+        # Check jobs table for layout_template
         try:
             await session.execute(text("SELECT layout_template FROM jobs LIMIT 1"))
         except Exception:
@@ -133,7 +135,33 @@ async def init_db():
                 db_logger.error(f"Failed to add 'layout_template' to 'jobs': {e}")
                 await session.rollback()
 
-        # Check clips table
+        # Check jobs table for resolution
+        try:
+            await session.execute(text("SELECT resolution FROM jobs LIMIT 1"))
+        except Exception:
+            await session.rollback()
+            try:
+                await session.execute(text("ALTER TABLE jobs ADD COLUMN resolution VARCHAR DEFAULT '1080p'"))
+                await session.commit()
+                db_logger.info("Added column 'resolution' to 'jobs' table.")
+            except Exception as e:
+                db_logger.error(f"Failed to add 'resolution' to 'jobs': {e}")
+                await session.rollback()
+
+        # Check jobs table for cookies
+        try:
+            await session.execute(text("SELECT cookies FROM jobs LIMIT 1"))
+        except Exception:
+            await session.rollback()
+            try:
+                await session.execute(text("ALTER TABLE jobs ADD COLUMN cookies TEXT"))
+                await session.commit()
+                db_logger.info("Added column 'cookies' to 'jobs' table.")
+            except Exception as e:
+                db_logger.error(f"Failed to add 'cookies' to 'jobs': {e}")
+                await session.rollback()
+
+        # Check clips table for layout_template
         try:
             await session.execute(text("SELECT layout_template FROM clips LIMIT 1"))
         except Exception:
