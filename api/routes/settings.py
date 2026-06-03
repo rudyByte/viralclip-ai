@@ -65,10 +65,35 @@ def test_curl_cffi():
         import curl_cffi
         from curl_cffi import requests as c_requests
         r = c_requests.get("https://www.youtube.com", impersonate="chrome")
+        
+        import yt_dlp
+        targets = []
+        available_targets = []
+        
+        try:
+            # List all targets in yt-dlp network module
+            from yt_dlp.networking.impersonate import IMPERSONATE_TARGETS
+            targets = list(IMPERSONATE_TARGETS.keys())
+            
+            # Check availability of specific browsers
+            from yt_dlp.networking.impersonate import get_impersonate_target
+            for t in ["chrome", "firefox", "safari", "edge"]:
+                try:
+                    if get_impersonate_target(t) is not None:
+                        available_targets.append(t)
+                except Exception as ex:
+                    available_targets.append(f"{t}: Error({ex})")
+        except Exception as e:
+            targets = [f"Import error: {e}"]
+            
         return {
             "success": True, 
             "message": "curl_cffi loaded and executed successfully", 
-            "status_code": r.status_code
+            "status_code": r.status_code,
+            "curl_cffi_version": getattr(curl_cffi, "__version__", "unknown"),
+            "yt_dlp_version": yt_dlp.__version__,
+            "targets": targets,
+            "available_targets": available_targets
         }
     except Exception as e:
         import traceback
