@@ -1,0 +1,46 @@
+"""
+ViralClip AI — Settings API
+POST /api/settings/cookies  — save YouTube cookies to server
+GET  /api/settings/cookies  — check if cookies are saved
+DELETE /api/settings/cookies — remove saved cookies
+"""
+from fastapi import APIRouter
+from pydantic import BaseModel
+from pathlib import Path
+import os
+
+router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+COOKIES_PATH = Path(os.environ.get("YT_DLP_COOKIES_FILE", "/app/data/cookies.txt"))
+
+
+class CookiesPayload(BaseModel):
+    cookies: str
+
+
+@router.get("/cookies")
+def get_cookies_status():
+    exists = COOKIES_PATH.exists() and COOKIES_PATH.stat().st_size > 100
+    return {"saved": exists, "path": str(COOKIES_PATH) if exists else None}
+
+
+@router.post("/cookies")
+def save_cookies(payload: CookiesPayload):
+    if not payload.cookies or len(payload.cookies.strip()) < 50:
+        return {"success": False, "error": "Cookies text too short or empty"}
+    try:
+        COOKIES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        COOKIES_PATH.write_text(payload.cookies.strip(), encoding="utf-8")
+        return {"success": True, "message": "Cookies saved. All future jobs will use them automatically."}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.delete("/cookies")
+def delete_cookies():
+    try:
+        if COOKIES_PATH.exists():
+            COOKIES_PATH.unlink()
+        return {"success": True, "message": "Cookies deleted."}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

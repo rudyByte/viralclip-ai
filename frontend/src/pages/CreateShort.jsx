@@ -40,6 +40,8 @@ export default function CreateShort() {
   const [captionStyle, setCaptionStyle] = useState('hormozi')
   const [backgroundType, setBackgroundType] = useState('subway')
   const [layoutTemplate, setLayoutTemplate] = useState('split_50_50')
+  const [resolution, setResolution] = useState('1080p')
+  const [cookies, setCookies] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async (e) => {
@@ -70,7 +72,9 @@ export default function CreateShort() {
         num_clips: parseInt(numClips),
         caption_style: captionStyle,
         background_type: backgroundType,
-        layout_template: layoutTemplate
+        layout_template: layoutTemplate,
+        resolution: resolution,
+        cookies: cookies || null
       })
       
       toast.success(response.message || 'Job(s) queued successfully!')
@@ -298,6 +302,54 @@ export default function CreateShort() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Step 6: Advanced Settings */}
+        <div className="glass rounded-2xl p-6 space-y-6">
+          <div className="flex items-center gap-2 text-sm font-bold text-white uppercase tracking-wider">
+            <Sliders className="w-5 h-5 text-brand-400" />
+            <span>6. Quality & Cloud Bypass Settings (Optional)</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-1 space-y-2">
+              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                Video Resolution
+              </label>
+              <select
+                value={resolution}
+                onChange={(e) => setResolution(e.target.value)}
+                disabled={submitting}
+                className="w-full px-3 py-3 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-semibold"
+              >
+                <option value="best">Highest (Unrestricted 4K/2K/1080p)</option>
+                <option value="1080p">1080p Full HD (Default)</option>
+                <option value="720p">720p HD</option>
+                <option value="480p">480p SD</option>
+              </select>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Lower resolutions download and process significantly faster.
+              </p>
+            </div>
+
+            <div className="md:col-span-2 space-y-2">
+              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block flex justify-between">
+                <span>YouTube Cookies (Netscape format)</span>
+                <span className="text-[10px] text-brand-400 lowercase italic">Optional</span>
+              </label>
+              <textarea
+                placeholder="Paste your Netscape cookies text here to bypass 'Sign in to confirm you're not a bot' blocks when running on the hosted/production server."
+                value={cookies}
+                onChange={(e) => setCookies(e.target.value)}
+                disabled={submitting}
+                rows={3}
+                className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-medium text-xs font-mono resize-y"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Use a browser extension like "Get cookies.txt" to copy cookies from YouTube.
+              </p>
+            </div>
           </div>
         </div>
 

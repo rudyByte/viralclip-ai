@@ -62,6 +62,8 @@ async def run_pipeline(
     caption_style: str = "hormozi",
     background_type: str = "subway",
     layout_template: str = "split_50_50",
+    resolution: str = "1080p",
+    cookies: Optional[str] = None,
 ):
     """
     Full ViralClip AI processing pipeline with checkpoint-based resume.
@@ -98,7 +100,7 @@ async def run_pipeline(
             if not expected_audio_path.exists():
                 logger.info(f"[{job_id}] Audio file missing. Extracting from existing video...")
                 await update_job_status(job_id, "downloading", 10, "Extracting audio from existing download...")
-                downloader = Downloader(str(temp_dir))
+                downloader = Downloader(str(temp_dir), resolution=resolution, cookies=cookies)
                 await asyncio.get_running_loop().run_in_executor(
                     None, downloader._extract_audio, video_path, str(expected_audio_path)
                 )
@@ -108,7 +110,7 @@ async def run_pipeline(
             # Update video info in DB if missing
             if not job or not job.title:
                 try:
-                    downloader = Downloader(str(temp_dir))
+                    downloader = Downloader(str(temp_dir), resolution=resolution, cookies=cookies)
                     info = await downloader.get_video_info_async(youtube_url)
                     async with AsyncSessionLocal() as db:
                         from sqlalchemy import update as sq_update
@@ -147,7 +149,7 @@ async def run_pipeline(
             await update_job_status(job_id, "downloading", 5, "Downloading video...")
             logger.info(f"[{job_id}] Step 1: Downloading {youtube_url}")
 
-            downloader = Downloader(str(temp_dir))
+            downloader = Downloader(str(temp_dir), resolution=resolution, cookies=cookies)
             info = await downloader.get_video_info_async(youtube_url)
             yt_title = info.title
 

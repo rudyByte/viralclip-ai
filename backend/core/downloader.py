@@ -39,12 +39,37 @@ class VideoInfo:
 
 
 class Downloader:
-    def __init__(self, output_dir: str):
+    def __init__(self, output_dir: str, resolution: str = "1080p", cookies: Optional[str] = None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.resolution = resolution
+        
+        # Save custom cookies to a file in the job temporary directory if provided
+        self.cookies_file_path = None
+        if cookies and cookies.strip():
+            c_file = self.output_dir / "job_cookies.txt"
+            try:
+                c_file.write_text(cookies.strip(), encoding="utf-8")
+                self.cookies_file_path = str(c_file)
+                logger.info(f"Saved custom cookies to {self.cookies_file_path}")
+            except Exception as e:
+                logger.error(f"Failed to write custom cookies file: {e}")
 
     def _get_ydl_opts(self, extra_opts: Optional[dict] = None) -> dict:
         """Construct standard ydl_opts with cookie and client spoofing workarounds."""
+        # Determine format based on chosen resolution
+        res_limit = "1080"
+        if self.resolution == "best":
+            video_format = "bestvideo+bestaudio/best"
+        else:
+            if self.resolution == "720p":
+                res_limit = "720"
+            elif self.resolution == "480p":
+                res_limit = "480"
+            elif self.resolution == "360p":
+                res_limit = "360"
+            video_format = f"bestvideo[ext=mp4][height<={res_limit}]+bestaudio[ext=m4a]/bestvideo[height<={res_limit}]+bestaudio/best[height<={res_limit}]/best"
+
         opts = {
             "quiet": True,
             "no_warnings": True,
@@ -53,19 +78,18 @@ class Downloader:
             "fragment_retries": 15,
             "file_access_retries": 5,
             "nocheckcertificate": True,  # Bypass SSL certificate check drops
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "web"],
-                }
-            }
+            "format": video_format,
         }
         
-        # Check for cookies file
+        # Check for cookies file (prioritize custom job-specific cookies)
         cookies_file = None
-        for p in [os.environ.get("YT_DLP_COOKIES_FILE"), "/app/data/cookies.txt", "data/cookies.txt", "cookies.txt"]:
-            if p and os.path.exists(p):
-                cookies_file = p
-                break
+        if self.cookies_file_path and os.path.exists(self.cookies_file_path):
+            cookies_file = self.cookies_file_path
+        else:
+            for p in [os.environ.get("YT_DLP_COOKIES_FILE"), "/app/data/cookies.txt", "data/cookies.txt", "cookies.txt"]:
+                if p and os.path.exists(p):
+                    cookies_file = p
+                    break
                 
         if cookies_file:
             opts["cookiefile"] = cookies_file
@@ -129,9 +153,8 @@ class Downloader:
                 pct = int((downloaded / total) * 100) if total else 0
                 progress_callback(pct)
 
-        # Base download options
+        # Base download options (format key removed to avoid overriding format determined in _get_ydl_opts)
         base_opts = {
-            "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "outtmpl": video_path,
             "merge_output_format": "mp4",
             "noprogress": True,

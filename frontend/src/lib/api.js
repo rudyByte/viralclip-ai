@@ -48,6 +48,16 @@ export const getConfig = () =>
 export const healthCheck = () =>
   api.get('/health', { baseURL: API_BASE_URL }).then((r) => r.data)
 
+// ── Settings / Cookies ───────────────────────────────────────────
+export const getCookiesStatus = () =>
+  api.get('/settings/cookies').then((r) => r.data)
+
+export const saveCookies = (cookies) =>
+  api.post('/settings/cookies', { cookies }).then((r) => r.data)
+
+export const deleteCookies = () =>
+  api.delete('/settings/cookies').then((r) => r.data)
+
 // ── WebSocket helper ──────────────────────────────────────────────
 export const createJobSocket = (jobId, onMessage, onClose) => {
   const wsBase = API_BASE_URL.replace(/^http/, 'ws')

@@ -1,208 +1,132 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  Settings as SettingsIcon, Shield, Server, FileText, Cpu, Check, 
-  HelpCircle, AlertCircle, RefreshCw, FolderOpen, Info 
-} from 'lucide-react'
-import { getConfig, healthCheck } from '@/lib/api'
+import { Settings as SettingsIcon, Cookie, CheckCircle2, Trash2, Save, Loader2, AlertTriangle } from 'lucide-react'
+import { getCookiesStatus, saveCookies, deleteCookies } from '@/lib/api'
 import toast from 'react-hot-toast'
 
 export default function Settings() {
-  const [config, setConfig] = useState(null)
-  const [health, setHealth] = useState(null)
+  const [cookiesText, setCookiesText] = useState('')
+  const [status, setStatus] = useState(null)  // {saved: bool}
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [saving, setSaving] = useState(false)
 
-  const fetchSettingsData = async (silent = false) => {
-    if (!silent) setLoading(true)
-    else setRefreshing(true)
+  useEffect(() => {
+    getCookiesStatus()
+      .then(setStatus)
+      .catch(() => setStatus({ saved: false }))
+      .finally(() => setLoading(false))
+  }, [])
 
+  const handleSave = async () => {
+    if (!cookiesText.trim()) return toast.error('Paste your cookies text first')
+    setSaving(true)
     try {
-      const configData = await getConfig()
-      setConfig(configData)
-      
-      const healthData = await healthCheck()
-      setHealth(healthData)
-    } catch (err) {
-      console.error(err)
-      toast.error('Failed to load system configurations')
+      const res = await saveCookies(cookiesText)
+      if (res.success) {
+        toast.success('Cookies saved! All future jobs will use them.')
+        setStatus({ saved: true })
+        setCookiesText('')
+      } else {
+        toast.error(res.error || 'Failed to save cookies')
+      }
+    } catch {
+      toast.error('Failed to reach backend')
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      setSaving(false)
     }
   }
 
-  useEffect(() => {
-    fetchSettingsData()
-  }, [])
+  const handleDelete = async () => {
+    try {
+      await deleteCookies()
+      setStatus({ saved: false })
+      toast.success('Cookies removed')
+    } catch {
+      toast.error('Failed to delete cookies')
+    }
+  }
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
-      transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="p-8 max-w-4xl mx-auto space-y-8"
+      transition={{ duration: 0.3 }}
+      className="p-4 md:p-8 max-w-3xl mx-auto space-y-8"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-extrabold text-white flex items-center gap-2">
-            <SettingsIcon className="w-8 h-8 text-brand-400" />
-            <span>System Settings</span>
-          </h1>
-          <p className="text-slate-400 mt-1">
-            View active model configurations, API keys integration, and system environment stats.
-          </p>
+      <div>
+        <h1 className="text-3xl font-extrabold text-white flex items-center gap-2">
+          <SettingsIcon className="w-8 h-8 text-brand-400" />
+          Settings
+        </h1>
+        <p className="text-slate-400 mt-1">Configure global backend settings for all jobs.</p>
+      </div>
+
+      {/* YouTube Cookies Card */}
+      <div className="glass rounded-2xl p-6 space-y-5">
+        <div className="flex items-center gap-2">
+          <Cookie className="w-5 h-5 text-brand-400" />
+          <h2 className="text-white font-bold text-lg">YouTube Cookies</h2>
+        </div>
+
+        {/* Status badge */}
+        {loading ? (
+          <div className="flex items-center gap-2 text-slate-400 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> Checking...</div>
+        ) : status?.saved ? (
+          <div className="flex items-center justify-between p-3 rounded-xl bg-green-500/10 border border-green-500/30">
+            <div className="flex items-center gap-2 text-green-400 text-sm font-semibold">
+              <CheckCircle2 className="w-4 h-4" />
+              Cookies are saved on the server — all jobs will use them automatically.
+            </div>
+            <button
+              onClick={handleDelete}
+              className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors ml-4"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Remove
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            No cookies saved. YouTube may block downloads from cloud servers without them.
+          </div>
+        )}
+
+        {/* Instructions */}
+        <div className="space-y-2 text-sm text-slate-400">
+          <p className="font-semibold text-white text-sm">How to get your cookies (do this on your PC):</p>
+          <ol className="list-decimal list-inside space-y-1 ml-1">
+            <li>Open <strong className="text-white">Chrome</strong> on your PC and go to <strong className="text-white">youtube.com</strong> while logged in</li>
+            <li>Install the <strong className="text-white">"Get cookies.txt LOCALLY"</strong> extension from Chrome Web Store</li>
+            <li>Click the extension icon → <strong className="text-white">Export</strong> → copy all the text</li>
+            <li>Paste it in the box below and click <strong className="text-white">Save to Server</strong></li>
+          </ol>
+          <p className="text-xs text-slate-500 pt-1">✓ Saved cookies persist across all future jobs including from your phone. You only need to do this once.</p>
+        </div>
+
+        {/* Textarea */}
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+            Paste Netscape cookies.txt content
+          </label>
+          <textarea
+            placeholder={`# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tFALSE\t...\n...`}
+            value={cookiesText}
+            onChange={(e) => setCookiesText(e.target.value)}
+            rows={7}
+            className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono text-xs resize-y"
+          />
         </div>
 
         <button
-          onClick={() => fetchSettingsData(true)}
-          disabled={refreshing}
-          className="p-2.5 rounded-xl border border-white/10 hover:bg-white/5 active:scale-95 transition-all text-slate-400 hover:text-white"
+          onClick={handleSave}
+          disabled={saving || !cookiesText.trim()}
+          className="btn-primary flex items-center gap-2 px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          {saving ? 'Saving...' : 'Save to Server'}
         </button>
       </div>
-
-      {loading ? (
-        <div className="space-y-6">
-          {[1, 2].map(i => (
-            <div key={i} className="glass rounded-2xl p-8 shimmer h-48" />
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-6">
-          
-          {/* Section 1: API and Service Status */}
-          <div className="glass rounded-2xl p-6 space-y-6">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 border-b border-white/[0.06] pb-3">
-              <Shield className="w-4.5 h-4.5 text-brand-400" />
-              <span>Service Connections</span>
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              {/* Groq Cloud Connection */}
-              <div className="flex items-center justify-between p-4 rounded-xl bg-surface-900/50 border border-white/[0.04]">
-                <div>
-                  <h4 className="font-bold text-white text-sm">Groq AI API Integration</h4>
-                  <p className="text-xs text-slate-400 mt-1">Powering virality analysis (LLaMA 3.3 70B)</p>
-                </div>
-                {health?.groq_configured ? (
-                  <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Configured</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-pink-500/10 border border-pink-500/30 text-pink-400">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Missing Key</span>
-                  </span>
-                )}
-              </div>
-
-              {/* Whisper Transcriber */}
-              <div className="flex items-center justify-between p-4 rounded-xl bg-surface-900/50 border border-white/[0.04]">
-                <div>
-                  <h4 className="font-bold text-white text-sm">Whisper Model</h4>
-                  <p className="text-xs text-slate-400 mt-1">Generating word-level speech transcriptions</p>
-                </div>
-                <span className="px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
-                  {config?.whisper_model || health?.whisper_model || 'small'}
-                </span>
-              </div>
-
-            </div>
-
-            {!health?.groq_configured && (
-              <div className="flex gap-2.5 items-start bg-pink-500/5 border border-pink-500/20 rounded-xl p-4 text-xs text-pink-300">
-                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <p className="leading-relaxed">
-                  <strong>Missing API Key:</strong> To detect viral moments, you must create a <code>.env</code> file in your <code>backend</code> directory and add your <code>GROQ_API_KEY</code>. You can obtain a free key from the Groq Console.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Section 2: Pipeline Defaults */}
-          <div className="glass rounded-2xl p-6 space-y-4">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 border-b border-white/[0.06] pb-3">
-              <Cpu className="w-4.5 h-4.5 text-brand-400" />
-              <span>Pipeline Defaults & Limits</span>
-            </h3>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              
-              <div className="p-4 rounded-xl bg-surface-900/50 border border-white/[0.04]">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Concurrency</span>
-                <span className="text-lg font-extrabold text-white mt-1 block">{config?.max_concurrent_jobs} jobs</span>
-              </div>
-
-              <div className="p-4 rounded-xl bg-surface-900/50 border border-white/[0.04]">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Target FPS</span>
-                <span className="text-lg font-extrabold text-white mt-1 block">{config?.export_fps} fps</span>
-              </div>
-
-              <div className="p-4 rounded-xl bg-surface-900/50 border border-white/[0.04]">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Resolution</span>
-                <span className="text-lg font-extrabold text-white mt-1 block">{config?.export_resolution}</span>
-              </div>
-
-              <div className="p-4 rounded-xl bg-surface-900/50 border border-white/[0.04]">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Default Clips</span>
-                <span className="text-lg font-extrabold text-white mt-1 block">{config?.default_num_clips} per run</span>
-              </div>
-
-            </div>
-          </div>
-
-          {/* Section 3: Gameplay Assets Guide */}
-          <div className="glass rounded-2xl p-6 space-y-4">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 border-b border-white/[0.06] pb-3">
-              <FolderOpen className="w-4.5 h-4.5 text-brand-400" />
-              <span>Gameplay Overlay Asset Guide</span>
-            </h3>
-
-            <div className="space-y-3 text-xs leading-relaxed text-slate-400">
-              <p>
-                ViralClip AI stacks a gameplay video under the cropped camera view to boost engagement and watch time. The backend automatically looks for gameplay loop files in these locations:
-              </p>
-              
-              <ul className="space-y-2 mt-2 bg-surface-900/50 border border-white/[0.04] p-4 rounded-xl font-mono text-slate-300">
-                <li>🏄‍♂️ Subway Surfers: <code className="text-indigo-400">assets/gameplay/subway/</code></li>
-                <li>🧱 Minecraft Parkour: <code className="text-indigo-400">assets/gameplay/minecraft/</code></li>
-                <li>🚗 GTA V Stunts: <code className="text-indigo-400">assets/gameplay/gta/</code></li>
-                <li>🏃‍♂️ Temple Run: <code className="text-indigo-400">assets/gameplay/templerun/</code></li>
-              </ul>
-
-              <div className="flex gap-2 items-start bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-3 text-slate-400">
-                <Info className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
-                <p>
-                  <strong>Tip:</strong> Drop high-quality portrait/landscape gameplay videos (mp4 format) inside those folders. If multiple files are placed in a folder, the mixer selects a random one during compilation.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 4: System Information */}
-          <div className="glass rounded-2xl p-6 space-y-3 text-xs">
-            <div className="flex justify-between border-b border-white/[0.04] pb-2 text-slate-400">
-              <span>App Core Version</span>
-              <span className="font-mono text-white font-bold">{health?.version || '1.0.0'}</span>
-            </div>
-            <div className="flex justify-between border-b border-white/[0.04] pb-2 text-slate-400">
-              <span>Environment Mode</span>
-              <span className="font-mono text-white font-bold">Local Development</span>
-            </div>
-            <div className="flex justify-between text-slate-400">
-              <span>FastAPI Port</span>
-              <span className="font-mono text-white font-bold">8000</span>
-            </div>
-          </div>
-
-        </div>
-      )}
     </motion.div>
   )
 }
