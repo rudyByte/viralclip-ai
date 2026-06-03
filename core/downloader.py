@@ -30,16 +30,70 @@ class Downloader:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def get_video_info(self, url: str) -> VideoInfo:
-        """Fetch video metadata without downloading."""
-        ydl_opts = {
+    def _get_ydl_opts(self, extra_opts: Optional[dict] = None) -> dict:
+        """Construct standard ydl_opts with cookie and client spoofing workarounds."""
+        opts = {
             "quiet": True,
             "no_warnings": True,
-            "skip_download": True,
+            "socket_timeout": 60,
+            "retries": 15,
+            "fragment_retries": 15,
+            "file_access_retries": 5,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "web"],
+                }
+            }
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return VideoInfo(info)
+        
+        # Check for cookies file
+        cookies_file = None
+        for p in [os.environ.get("YT_DLP_COOKIES_FILE"), "/app/data/cookies.txt", "data/cookies.txt", "cookies.txt"]:
+            if p and os.path.exists(p):
+                cookies_file = p
+                break
+                
+        if cookies_file:
+            opts["cookiefile"] = cookies_file
+            logger.info(f"Using cookies file: {cookies_file}")
+        elif not os.environ.get("RUNNING_IN_DOCKER"):
+            # Try using cookies from browser when running locally (not in Docker)
+            # Since cookiesfrombrowser can fail/warn if browsers aren't found/configured,
+            # we will set it here and catch errors/retry dynamically if it raises exception.
+            opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
+            logger.info("Attempting to use browser cookies (local execution)")
+            
+        if extra_opts:
+            for k, v in extra_opts.items():
+                if k == "extractor_args" and "extractor_args" in opts:
+                    # Merge extractor_args
+                    for ext, args in v.items():
+                        if ext in opts["extractor_args"]:
+                            opts["extractor_args"][ext].update(args)
+                        else:
+                            opts["extractor_args"][ext] = args
+                else:
+                    opts[k] = v
+        return opts
+
+    def get_video_info(self, url: str) -> VideoInfo:
+        """Fetch video metadata without downloading."""
+        ydl_opts = self._get_ydl_opts({
+            "skip_download": True,
+        })
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return VideoInfo(info)
+        except Exception as err:
+            # Fallback if cookiesfrombrowser caused failure
+            if "cookiesfrombrowser" in ydl_opts:
+                logger.warning(f"Metadata fetch with browser cookies failed ({err}). Retrying without browser cookies...")
+                del ydl_opts["cookiesfrombrowser"]
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    return VideoInfo(info)
+            raise
 
     def download_video(
         self,
@@ -61,20 +115,13 @@ class Downloader:
                 pct = int((downloaded / total) * 100) if total else 0
                 progress_callback(pct)
 
-        # Download best video+audio merged — robust against network instability
-        ydl_opts = {
+        # Base download options
+        base_opts = {
             "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             "outtmpl": video_path,
             "merge_output_format": "mp4",
-            "quiet": True,
-            "no_warnings": True,
             "noprogress": True,
             "progress_hooks": [progress_hook],
-            # Network resilience
-            "socket_timeout": 60,
-            "retries": 15,
-            "fragment_retries": 15,
-            "file_access_retries": 5,
             "continuedl": True,          # Resume partial downloads
             "http_chunk_size": 10485760,  # 10MB chunks — fewer TCP hangs
             "sleep_interval_requests": 2, # Pause between retries
@@ -84,11 +131,18 @@ class Downloader:
                 "preferedformat": "mp4",
             }],
         }
+        
+        ydl_opts = self._get_ydl_opts(base_opts)
 
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                current_opts = ydl_opts.copy()
+                if attempt > 1 and "cookiesfrombrowser" in current_opts:
+                    # If first attempt failed, disable browser cookies fallback in case it triggered error
+                    del current_opts["cookiesfrombrowser"]
+                    
+                with yt_dlp.YoutubeDL(current_opts) as ydl:
                     ydl.download([url])
                 break  # Success
             except Exception as dl_err:
