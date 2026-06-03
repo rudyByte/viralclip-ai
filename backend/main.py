@@ -342,6 +342,26 @@ async def health():
     }
 
 
+@app.get("/api/debug_ytdlp")
+async def debug_ytdlp(url: str = "https://www.youtube.com/watch?v=FR2SkETgQ0o", use_cookies: bool = True):
+    import subprocess
+    cmd = ["yt-dlp", "--list-formats", url]
+    if use_cookies:
+        if os.path.exists("cookies.txt"):
+            cmd.extend(["--cookiefile", "cookies.txt"])
+        elif os.path.exists("/app/cookies.txt"):
+            cmd.extend(["--cookiefile", "/app/cookies.txt"])
+        elif os.path.exists("/app/data/cookies.txt"):
+            cmd.extend(["--cookiefile", "/app/data/cookies.txt"])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return {
+        "args": cmd,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+
+
 @app.get("/api/config")
 async def get_config():
     """Return safe public config (no API keys)."""
