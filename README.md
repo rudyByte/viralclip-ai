@@ -1,3 +1,13 @@
+---
+title: Viralclip Backend
+emoji: 🎬
+colorFrom: purple
+colorTo: indigo
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # 🎬 ViralClip AI
 
 > A modern, open-source alternative to OpusClip and Vidyo.ai. Automatically scrape, transcribe, analyze, and generate highly viral shorts/clips from long-form YouTube videos, powered by **FastAPI**, **React (Vite + Tailwind)**, **Groq**, and **Whisper**.
