@@ -1,3 +1,17 @@
+import ssl
+
+# Disable strict OpenSSL 3.0+ check for SSL: UNEXPECTED_EOF_WHILE_READING globally
+try:
+    orig_create_default_context = ssl.create_default_context
+    def patched_create_default_context(*args, **kwargs):
+        context = orig_create_default_context(*args, **kwargs)
+        op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
+        context.options |= op_ignore
+        return context
+    ssl.create_default_context = patched_create_default_context
+except Exception:
+    pass
+
 import logging
 import asyncio
 import shutil

@@ -10,6 +10,19 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Callable
 import logging
+import ssl
+
+# Disable strict OpenSSL 3.0+ check for SSL: UNEXPECTED_EOF_WHILE_READING
+try:
+    orig_create_default_context = ssl.create_default_context
+    def patched_create_default_context(*args, **kwargs):
+        context = orig_create_default_context(*args, **kwargs)
+        op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
+        context.options |= op_ignore
+        return context
+    ssl.create_default_context = patched_create_default_context
+except Exception:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +52,7 @@ class Downloader:
             "retries": 15,
             "fragment_retries": 15,
             "file_access_retries": 5,
+            "nocheckcertificate": True,  # Bypass SSL certificate check drops
             "extractor_args": {
                 "youtube": {
                     "player_client": ["android", "web"],
