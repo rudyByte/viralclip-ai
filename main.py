@@ -26,6 +26,7 @@ from config import get_settings
 from database import init_db, AsyncSessionLocal, Job
 from api.routes.video import router as video_router
 from api.routes.clips import router as clips_router
+from api.routes.settings import router as settings_router
 from core.pipeline import run_pipeline
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -234,6 +235,7 @@ app.add_middleware(
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(video_router)
 app.include_router(clips_router)
+app.include_router(settings_router)
 
 # ── Serve exports as static files ─────────────────────────────────────────────
 exports_path = Path(settings.export_dir)
