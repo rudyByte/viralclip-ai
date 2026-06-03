@@ -57,35 +57,3 @@ def get_logs():
         except Exception as e:
             return {"success": False, "error": str(e)}
     return {"success": False, "error": f"Log file not found at {log_file}"}
-
-
-@router.get("/test-curl-cffi")
-def test_curl_cffi():
-    try:
-        import curl_cffi
-        from curl_cffi import requests as c_requests
-        r = c_requests.get("https://www.youtube.com", impersonate="chrome")
-        
-        import yt_dlp
-        targets = []
-        available_targets = []
-        
-        import inspect
-        import yt_dlp.networking.impersonate as imp_mod
-        source = inspect.getsource(imp_mod)
-        
-        return {
-            "success": True, 
-            "message": "curl_cffi loaded and executed successfully", 
-            "status_code": r.status_code,
-            "curl_cffi_version": getattr(curl_cffi, "__version__", "unknown"),
-            "yt_dlp_version": getattr(yt_dlp, "__version__", "unknown"),
-            "source": source
-        }
-    except Exception as e:
-        import traceback
-        return {
-            "success": False, 
-            "error": str(e), 
-            "traceback": traceback.format_exc()
-        }

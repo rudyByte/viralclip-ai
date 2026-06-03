@@ -105,11 +105,18 @@ class Downloader:
             logger.info(f"Using cookies file: {cookies_file}")
         elif not os.environ.get("RUNNING_IN_DOCKER"):
             # Try using cookies from browser when running locally (not in Docker)
-            # Since cookiesfrombrowser can fail/warn if browsers aren't found/configured,
-            # we will set it here and catch errors/retry dynamically if it raises exception.
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
-            
+
+        # Enable curl_cffi Chrome impersonation if available (bypasses TLS fingerprinting)
+        try:
+            import curl_cffi  # noqa: F401
+            from yt_dlp.networking.impersonate import ImpersonateTarget
+            opts["impersonate"] = ImpersonateTarget(client="chrome")
+            logger.info("curl_cffi detected: enabled ImpersonateTarget(chrome) for yt-dlp.")
+        except Exception as _imp_err:
+            logger.debug(f"curl_cffi impersonation unavailable: {_imp_err}")
+
         if extra_opts:
             for k, v in extra_opts.items():
                 if k == "extractor_args" and "extractor_args" in opts:
