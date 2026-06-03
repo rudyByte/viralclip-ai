@@ -81,7 +81,7 @@ class Downloader:
             "format": video_format,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android", "web"],
+                    "player_client": ["default", "-android_sdkless"],
                 }
             }
         }
