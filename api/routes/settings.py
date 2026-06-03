@@ -57,3 +57,33 @@ def get_logs():
         except Exception as e:
             return {"success": False, "error": str(e)}
     return {"success": False, "error": f"Log file not found at {log_file}"}
+
+
+@router.get("/test-impersonate")
+def test_impersonate():
+    try:
+        import yt_dlp
+        from yt_dlp.networking import _registries
+        from yt_dlp.networking.common import RequestHandler
+        
+        # Inspect handlers
+        handlers = list(_registries.request_handlers.keys())
+        
+        # Try to find what targets are registered
+        targets = []
+        for name, handler_cls in _registries.request_handlers.items():
+            targets.append({
+                "name": name,
+                "supported_impersonate_targets": str(getattr(handler_cls, "_SUPPORTED_IMPERSONATE_TARGET_MAP", None))
+            })
+            
+        import curl_cffi
+        return {
+            "success": True,
+            "handlers": handlers,
+            "targets": targets,
+            "curl_cffi_version": getattr(curl_cffi, "__version__", None)
+        }
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
