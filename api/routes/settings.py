@@ -66,17 +66,20 @@ def test_impersonate():
         import yt_dlp.networking as net_mod
         
         attrs = dir(net_mod)
-        handlers_info = []
         
-        # Look for request handlers in yt_dlp
-        from yt_dlp.networking import request_handlers
-        handlers_info = dir(request_handlers)
-        
+        # Check if impersonate is there
+        imp_dir = []
+        try:
+            import yt_dlp.networking.impersonate as imp_mod
+            imp_dir = dir(imp_mod)
+        except Exception as e:
+            imp_dir = ["error: " + str(e)]
+            
         import curl_cffi
         return {
             "success": True,
             "attrs": attrs,
-            "request_handlers_dir": handlers_info,
+            "impersonate_dir": imp_dir,
             "curl_cffi_version": getattr(curl_cffi, "__version__", None)
         }
     except Exception as e:
