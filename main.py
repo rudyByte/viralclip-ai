@@ -344,31 +344,37 @@ async def health():
 
 @app.get("/api/debug_ytdlp")
 async def debug_ytdlp(url: str = "https://www.youtube.com/watch?v=FR2SkETgQ0o", use_cookies: bool = True):
-    import subprocess
-    cmd = ["yt-dlp", "--list-formats", url]
+    import yt_dlp
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "nocheckcertificate": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web", "android"]
+            }
+        }
+    }
     if use_cookies:
         if os.path.exists("cookies.txt"):
-            cmd.extend(["--cookies", "cookies.txt"])
+            ydl_opts["cookiefile"] = "cookies.txt"
         elif os.path.exists("/app/cookies.txt"):
-            cmd.extend(["--cookies", "/app/cookies.txt"])
+            ydl_opts["cookiefile"] = "/app/cookies.txt"
         elif os.path.exists("/app/data/cookies.txt"):
-            cmd.extend(["--cookies", "/app/data/cookies.txt"])
+            ydl_opts["cookiefile"] = "/app/data/cookies.txt"
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            formats = [f.get("format_id") for f in info.get("formats", [])]
+            return {
+                "success": True,
+                "formats": formats,
+                "title": info.get("title"),
+            }
+    except Exception as e:
         return {
-            "args": cmd,
-            "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        }
-    except subprocess.TimeoutExpired as te:
-        # te.stdout and te.stderr might be bytes or string depending on Python version and run options,
-        # but since we set text=True they should be strings or bytes if not captured.
-        return {
-            "args": cmd,
-            "error": "TimeoutExpired",
-            "stdout": str(te.stdout or ""),
-            "stderr": str(te.stderr or ""),
+            "success": False,
+            "error": str(e),
         }
 
 
