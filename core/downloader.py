@@ -97,9 +97,8 @@ class Downloader:
             "format": video_format,
             "extractor_args": {
                 "youtube": {
-                    # ios client: no NSIG JS decryption needed, combined mp4 streams,
-                    # most reliable on cloud/datacenter IPs.
-                    "player_client": ["ios"]
+                    # web client correctly uses cookies.txt browser-format auth
+                    "player_client": ["web"]
                 }
             }
         }
@@ -121,17 +120,6 @@ class Downloader:
             # Try using cookies from browser when running locally (not in Docker)
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
-
-        # ImpersonateTarget only helps web client requests.
-        # DO NOT use with ios client — Chrome TLS + iOS API headers = YouTube rejects request.
-        if not os.environ.get("RUNNING_IN_DOCKER"):
-            try:
-                import curl_cffi  # noqa: F401
-                from yt_dlp.networking.impersonate import ImpersonateTarget
-                opts["impersonate"] = ImpersonateTarget(client="chrome")
-                logger.info("curl_cffi: enabled ImpersonateTarget(chrome) for local web client.")
-            except Exception as _imp_err:
-                logger.debug(f"curl_cffi impersonation unavailable: {_imp_err}")
 
         if extra_opts:
             for k, v in extra_opts.items():
