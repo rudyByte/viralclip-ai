@@ -95,28 +95,24 @@ class Downloader:
             "file_access_retries": 5,
             "nocheckcertificate": True,  # Bypass SSL certificate check drops
             "format": video_format,
-            "js_runtimes": {"node": {}},  # Explicitly use nodejs for deciphering signature ciphers
             "extractor_args": {
                 "youtube": {
-                    # Try web first, fall back to android if blocked/restricted
-                    "player_client": ["web", "android"]
+                    # android_vr uses a different API endpoint that works on datacenter IPs
+                    # without needing cookies or JS signature deciphering
+                    "player_client": ["android_vr"]
                 }
             }
         }
         
-        # Check for cookies file (prioritize custom job-specific cookies)
+        # Only use cookies if the user explicitly uploaded job-specific ones.
+        # The default cookies.txt in the repo is often stale and actively causes
+        # 'Sign in to confirm you are not a bot' errors with the web client.
+        # android_vr client handles public videos without any cookies from datacenter IPs.
         cookies_file = None
         if self.cookies_file_path and os.path.exists(self.cookies_file_path):
             cookies_file = self.cookies_file_path
-        else:
-            for p in [os.environ.get("YT_DLP_COOKIES_FILE"), "/app/data/cookies.txt", "data/cookies.txt", "cookies.txt"]:
-                if p and os.path.exists(p):
-                    cookies_file = p
-                    break
-                
-        if cookies_file:
             opts["cookiefile"] = cookies_file
-            logger.info(f"Using cookies file: {cookies_file}")
+            logger.info(f"Using job-specific cookies file: {cookies_file}")
         elif not os.environ.get("RUNNING_IN_DOCKER"):
             # Try using cookies from browser when running locally (not in Docker)
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
