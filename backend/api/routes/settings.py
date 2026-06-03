@@ -44,3 +44,16 @@ def delete_cookies():
         return {"success": True, "message": "Cookies deleted."}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@router.get("/logs")
+def get_logs():
+    log_file = "/app/data/backend.log"
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            return {"success": True, "logs": "".join(lines[-300:])}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    return {"success": False, "error": f"Log file not found at {log_file}"}

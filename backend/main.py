@@ -1,16 +1,30 @@
 import ssl
+import os
 
-# Disable strict OpenSSL 3.0+ check for SSL: UNEXPECTED_EOF_WHILE_READING globally
+# Deep SSL patch: intercept ALL SSLContext creation to add OP_IGNORE_UNEXPECTED_EOF
+# This fixes ssl.SSLEOFError on Python 3.11 + OpenSSL 3.0+ with YouTube connections
 try:
-    orig_create_default_context = ssl.create_default_context
-    def patched_create_default_context(*args, **kwargs):
-        context = orig_create_default_context(*args, **kwargs)
-        op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
-        context.options |= op_ignore
-        return context
-    ssl.create_default_context = patched_create_default_context
+    _op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
+    _orig_SSLContext_init = ssl.SSLContext.__init__
+    def _patched_SSLContext_init(self, *args, **kwargs):
+        if _orig_SSLContext_init is not object.__init__:
+            _orig_SSLContext_init(self, *args, **kwargs)
+        try:
+            self.options |= _op_ignore
+        except Exception:
+            pass
+    ssl.SSLContext.__init__ = _patched_SSLContext_init
+    # Also patch create_default_context as a belt-and-suspenders approach
+    _orig_cdc = ssl.create_default_context
+    def _patched_cdc(*args, **kwargs):
+        ctx = _orig_cdc(*args, **kwargs)
+        ctx.options |= _op_ignore
+        return ctx
+    ssl.create_default_context = _patched_cdc
 except Exception:
     pass
+
+os.environ.setdefault("PYTHONHTTPSVERIFY", "0")
 
 import logging
 import asyncio
@@ -35,6 +49,18 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Add FileHandler to capture logs for inspection
+try:
+    log_file = "/app/data/backend.log"
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logging.getLogger().addHandler(file_handler)
+    logger.info("Saved logging file handler registered.")
+except Exception as e:
+    logger.error(f"Failed to register log file handler: {e}")
+
 settings = get_settings()
 
 # ── Queue Worker ──────────────────────────────────────────────────────────────
