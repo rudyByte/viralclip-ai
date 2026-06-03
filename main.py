@@ -7,7 +7,8 @@ try:
     _op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
     _orig_SSLContext_init = ssl.SSLContext.__init__
     def _patched_SSLContext_init(self, *args, **kwargs):
-        _orig_SSLContext_init(self, *args, **kwargs)
+        if _orig_SSLContext_init is not object.__init__:
+            _orig_SSLContext_init(self, *args, **kwargs)
         try:
             self.options |= _op_ignore
         except Exception:
