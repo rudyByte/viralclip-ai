@@ -97,8 +97,9 @@ class Downloader:
             "format": video_format,
             "extractor_args": {
                 "youtube": {
-                    # web returns pre-muxed mp4 formats; ios/android bypass throttling
-                    "player_client": ["web", "ios", "android"]
+                    # ios client: no NSIG JS decryption needed, combined mp4 streams,
+                    # most reliable on cloud/datacenter IPs.
+                    "player_client": ["ios"]
                 }
             }
         }
@@ -121,14 +122,16 @@ class Downloader:
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
 
-        # Enable curl_cffi Chrome impersonation if available (bypasses TLS fingerprinting)
-        try:
-            import curl_cffi  # noqa: F401
-            from yt_dlp.networking.impersonate import ImpersonateTarget
-            opts["impersonate"] = ImpersonateTarget(client="chrome")
-            logger.info("curl_cffi detected: enabled ImpersonateTarget(chrome) for yt-dlp.")
-        except Exception as _imp_err:
-            logger.debug(f"curl_cffi impersonation unavailable: {_imp_err}")
+        # ImpersonateTarget only helps web client requests.
+        # DO NOT use with ios client — Chrome TLS + iOS API headers = YouTube rejects request.
+        if not os.environ.get("RUNNING_IN_DOCKER"):
+            try:
+                import curl_cffi  # noqa: F401
+                from yt_dlp.networking.impersonate import ImpersonateTarget
+                opts["impersonate"] = ImpersonateTarget(client="chrome")
+                logger.info("curl_cffi: enabled ImpersonateTarget(chrome) for local web client.")
+            except Exception as _imp_err:
+                logger.debug(f"curl_cffi impersonation unavailable: {_imp_err}")
 
         if extra_opts:
             for k, v in extra_opts.items():
@@ -145,12 +148,11 @@ class Downloader:
 
     def get_video_info(self, url: str) -> VideoInfo:
         """Fetch video metadata without downloading."""
-        # Use 'best' for info extraction — we don't need format restriction here,
-        # only during actual download. Avoids 'format not available' on restricted IPs.
-        ydl_opts = self._get_ydl_opts({
-            "skip_download": True,
-            "format": "best",
-        })
+        ydl_opts = self._get_ydl_opts({"skip_download": True})
+        # Remove format restriction entirely — yt-dlp validates format even for
+        # metadata-only calls (download=False). Without a format key it uses
+        # internal defaults and never raises 'format not available'.
+        ydl_opts.pop("format", None)
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)

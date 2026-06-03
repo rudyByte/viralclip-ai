@@ -97,8 +97,7 @@ class Downloader:
             "format": video_format,
             "extractor_args": {
                 "youtube": {
-                    # web returns pre-muxed mp4 formats; ios/android bypass throttling
-                    "player_client": ["web", "ios", "android"]
+                    "player_client": ["ios"]
                 }
             }
         }
@@ -121,14 +120,15 @@ class Downloader:
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
 
-        # Enable curl_cffi Chrome impersonation if available (bypasses TLS fingerprinting)
-        try:
-            import curl_cffi  # noqa: F401
-            from yt_dlp.networking.impersonate import ImpersonateTarget
-            opts["impersonate"] = ImpersonateTarget(client="chrome")
-            logger.info("curl_cffi detected: enabled ImpersonateTarget(chrome) for yt-dlp.")
-        except Exception as _imp_err:
-            logger.debug(f"curl_cffi impersonation unavailable: {_imp_err}")
+        # ImpersonateTarget conflicts with ios client (Chrome TLS + iOS headers = blocked).
+        if not os.environ.get("RUNNING_IN_DOCKER"):
+            try:
+                import curl_cffi  # noqa: F401
+                from yt_dlp.networking.impersonate import ImpersonateTarget
+                opts["impersonate"] = ImpersonateTarget(client="chrome")
+                logger.info("curl_cffi: enabled ImpersonateTarget(chrome) for local web client.")
+            except Exception as _imp_err:
+                logger.debug(f"curl_cffi impersonation unavailable: {_imp_err}")
 
         if extra_opts:
             for k, v in extra_opts.items():
@@ -145,11 +145,8 @@ class Downloader:
 
     def get_video_info(self, url: str) -> VideoInfo:
         """Fetch video metadata without downloading."""
-        # Use 'best' for info extraction — format restriction only needed during download.
-        ydl_opts = self._get_ydl_opts({
-            "skip_download": True,
-            "format": "best",
-        })
+        ydl_opts = self._get_ydl_opts({"skip_download": True})
+        ydl_opts.pop("format", None)  # no format validation during metadata fetch
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
