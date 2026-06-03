@@ -57,3 +57,23 @@ def get_logs():
         except Exception as e:
             return {"success": False, "error": str(e)}
     return {"success": False, "error": f"Log file not found at {log_file}"}
+
+
+@router.get("/test-curl-cffi")
+def test_curl_cffi():
+    try:
+        import curl_cffi
+        from curl_cffi import requests as c_requests
+        r = c_requests.get("https://www.youtube.com", impersonate="chrome")
+        return {
+            "success": True, 
+            "message": "curl_cffi loaded and executed successfully", 
+            "status_code": r.status_code
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False, 
+            "error": str(e), 
+            "traceback": traceback.format_exc()
+        }
