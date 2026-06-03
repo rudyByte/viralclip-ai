@@ -348,11 +348,11 @@ async def debug_ytdlp(url: str = "https://www.youtube.com/watch?v=FR2SkETgQ0o", 
     cmd = ["yt-dlp", "--list-formats", url]
     if use_cookies:
         if os.path.exists("cookies.txt"):
-            cmd.extend(["--cookiefile", "cookies.txt"])
+            cmd.extend(["--cookies", "cookies.txt"])
         elif os.path.exists("/app/cookies.txt"):
-            cmd.extend(["--cookiefile", "/app/cookies.txt"])
+            cmd.extend(["--cookies", "/app/cookies.txt"])
         elif os.path.exists("/app/data/cookies.txt"):
-            cmd.extend(["--cookiefile", "/app/data/cookies.txt"])
+            cmd.extend(["--cookies", "/app/data/cookies.txt"])
     result = subprocess.run(cmd, capture_output=True, text=True)
     return {
         "args": cmd,
