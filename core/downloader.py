@@ -83,6 +83,11 @@ class Downloader:
             "file_access_retries": 5,
             "nocheckcertificate": True,  # Bypass SSL certificate check drops
             "format": video_format,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["ios", "android"]
+                }
+            }
         }
         
         # Check for cookies file (prioritize custom job-specific cookies)
