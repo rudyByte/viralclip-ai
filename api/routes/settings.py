@@ -63,25 +63,25 @@ def get_logs():
 def test_impersonate():
     try:
         import yt_dlp
-        import yt_dlp.networking as net_mod
+        import yt_dlp.networking.impersonate as imp_mod
         
-        attrs = dir(net_mod)
-        
-        # Check if impersonate is there
-        imp_dir = []
+        # Subclasses
+        subclasses = []
         try:
-            import yt_dlp.networking.impersonate as imp_mod
-            imp_dir = dir(imp_mod)
+            import yt_dlp.networking._curlcffi as curl_mod
+            subclasses = [cls.__name__ for cls in imp_mod.ImpersonateRequestHandler.__subclasses__()]
+            supported = list(getattr(curl_mod.CurlCffiRH, "_SUPPORTED_IMPERSONATE_TARGET_MAP", {}).keys())
         except Exception as e:
-            imp_dir = ["error: " + str(e)]
+            subclasses = ["error: " + str(e)]
+            supported = []
             
         import curl_cffi
         return {
             "success": True,
-            "attrs": attrs,
-            "impersonate_dir": imp_dir,
+            "subclasses": subclasses,
+            "supported_targets": [str(t) for t in supported],
             "curl_cffi_version": getattr(curl_cffi, "__version__", None),
-            "yt_dlp_version": getattr(yt_dlp, "__version__", None)
+            "yt_dlp_version": getattr(yt_dlp.version, "__version__", None)
         }
     except Exception as e:
         import traceback
