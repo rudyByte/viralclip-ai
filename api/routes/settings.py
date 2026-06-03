@@ -70,7 +70,7 @@ def test_impersonate():
         try:
             import yt_dlp.networking._curlcffi as curl_mod
             subclasses = [cls.__name__ for cls in imp_mod.ImpersonateRequestHandler.__subclasses__()]
-            supported = list(getattr(curl_mod.CurlCffiRH, "_SUPPORTED_IMPERSONATE_TARGET_MAP", {}).keys())
+            supported = list(getattr(curl_mod.CurlCFFIRH, "_SUPPORTED_IMPERSONATE_TARGET_MAP", {}).keys())
         except Exception as e:
             subclasses = ["error: " + str(e)]
             supported = []
