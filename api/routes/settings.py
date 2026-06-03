@@ -91,7 +91,7 @@ def test_curl_cffi():
             "message": "curl_cffi loaded and executed successfully", 
             "status_code": r.status_code,
             "curl_cffi_version": getattr(curl_cffi, "__version__", "unknown"),
-            "yt_dlp_version": yt_dlp.__version__,
+            "yt_dlp_version": getattr(yt_dlp, "__version__", "unknown"),
             "targets": targets,
             "available_targets": available_targets
         }
