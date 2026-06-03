@@ -343,39 +343,57 @@ async def health():
 
 
 @app.get("/api/debug_ytdlp")
-async def debug_ytdlp(url: str = "https://www.youtube.com/watch?v=FR2SkETgQ0o", use_cookies: bool = True):
+async def debug_ytdlp(url: str = "https://www.youtube.com/watch?v=FR2SkETgQ0o"):
     import yt_dlp
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "nocheckcertificate": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["web", "android"]
+    
+    clients = ["web", "android", "ios", "mweb", "tv", "web_embedded", "tv_embedded"]
+    cookie_paths = ["cookies.txt", "/app/cookies.txt", "/app/data/cookies.txt"]
+    existing_cookie_path = None
+    for p in cookie_paths:
+        if os.path.exists(p):
+            existing_cookie_path = p
+            break
+            
+    results = []
+    
+    for client in clients:
+        for use_cookies in [True, False]:
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "nocheckcertificate": True,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": [client]
+                    }
+                }
             }
-        }
+            if use_cookies and existing_cookie_path:
+                ydl_opts["cookiefile"] = existing_cookie_path
+                
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    formats = [f.get("format_id") for f in info.get("formats", [])]
+                    results.append({
+                        "client": client,
+                        "use_cookies": use_cookies,
+                        "success": True,
+                        "formats_count": len(formats),
+                        "formats": formats[:10]  # first 10
+                    })
+            except Exception as e:
+                results.append({
+                    "client": client,
+                    "use_cookies": use_cookies,
+                    "success": False,
+                    "error": str(e)[:200]
+                })
+                
+    return {
+        "cookie_file_found": existing_cookie_path,
+        "results": results
     }
-    if use_cookies:
-        if os.path.exists("cookies.txt"):
-            ydl_opts["cookiefile"] = "cookies.txt"
-        elif os.path.exists("/app/cookies.txt"):
-            ydl_opts["cookiefile"] = "/app/cookies.txt"
-        elif os.path.exists("/app/data/cookies.txt"):
-            ydl_opts["cookiefile"] = "/app/data/cookies.txt"
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            formats = [f.get("format_id") for f in info.get("formats", [])]
-            return {
-                "success": True,
-                "formats": formats,
-                "title": info.get("title"),
-            }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
 
 
 @app.get("/api/config")
