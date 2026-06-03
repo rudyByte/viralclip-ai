@@ -49,6 +49,18 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Add FileHandler to capture logs for inspection
+try:
+    log_file = "/app/data/backend.log"
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logging.getLogger().addHandler(file_handler)
+    logger.info("Saved logging file handler registered.")
+except Exception as e:
+    logger.error(f"Failed to register log file handler: {e}")
+
 settings = get_settings()
 
 # ── Queue Worker ──────────────────────────────────────────────────────────────
