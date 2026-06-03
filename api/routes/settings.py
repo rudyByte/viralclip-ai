@@ -80,7 +80,8 @@ def test_impersonate():
             "success": True,
             "attrs": attrs,
             "impersonate_dir": imp_dir,
-            "curl_cffi_version": getattr(curl_cffi, "__version__", None)
+            "curl_cffi_version": getattr(curl_cffi, "__version__", None),
+            "yt_dlp_version": getattr(yt_dlp, "__version__", None)
         }
     except Exception as e:
         import traceback
