@@ -13,6 +13,7 @@ ENV TEMP_DIR=/app/temp
 ENV EXPORT_DIR=/app/exports
 ENV ASSETS_DIR=/app/assets
 ENV MODELS_DIR=/app/models
+ENV RUNNING_IN_DOCKER=true
 
 # Set working directory inside container
 WORKDIR /app
