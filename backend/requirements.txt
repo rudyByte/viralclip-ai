@@ -12,6 +12,7 @@ aiosqlite==0.20.0
 
 # Video Downloading
 yt-dlp
+yt-dlp-ejs
 curl-cffi==0.13.0
 
 # Speech Recognition

@@ -342,40 +342,6 @@ async def health():
     }
 
 
-@app.get("/api/debug_ytdlp")
-async def debug_ytdlp(url: str = "https://www.youtube.com/watch?v=FR2SkETgQ0o"):
-    import shutil
-    import subprocess
-    
-    node_path = shutil.which("node")
-    nodejs_path = shutil.which("nodejs")
-    
-    node_version = None
-    if node_path:
-        try:
-            r = subprocess.run(["node", "-v"], capture_output=True, text=True, timeout=5)
-            node_version = r.stdout.strip()
-        except Exception as e:
-            node_version = f"Error: {e}"
-            
-    nodejs_version = None
-    if nodejs_path:
-        try:
-            r = subprocess.run(["nodejs", "-v"], capture_output=True, text=True, timeout=5)
-            nodejs_version = r.stdout.strip()
-        except Exception as e:
-            nodejs_version = f"Error: {e}"
-            
-    return {
-        "node_path": node_path,
-        "nodejs_path": nodejs_path,
-        "node_version": node_version,
-        "nodejs_version": nodejs_version,
-        "env_path": os.environ.get("PATH"),
-        "uid": os.getuid() if hasattr(os, "getuid") else None,
-    }
-
-
 @app.get("/api/config")
 async def get_config():
     """Return safe public config (no API keys)."""

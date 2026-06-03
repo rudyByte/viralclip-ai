@@ -95,10 +95,11 @@ class Downloader:
             "file_access_retries": 5,
             "nocheckcertificate": True,  # Bypass SSL certificate check drops
             "format": video_format,
+            "js_runtimes": {"node": {}},  # Explicitly use nodejs for deciphering signature ciphers
             "extractor_args": {
                 "youtube": {
-                    # web client correctly uses cookies.txt browser-format auth
-                    "player_client": ["web"]
+                    # Try web first, fall back to android if blocked/restricted
+                    "player_client": ["web", "android"]
                 }
             }
         }
