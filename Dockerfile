@@ -40,6 +40,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source code
 COPY --chown=user:user . /app/
 
+# Seed server cookies for HF fallback if a cookies.txt file is present.
+RUN if [ -f /app/cookies.txt ]; then cp /app/cookies.txt /app/data/cookies.txt && chown user:user /app/data/cookies.txt; fi
+
 # Switch to the non-root user
 USER user
 

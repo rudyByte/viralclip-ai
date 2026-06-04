@@ -132,34 +132,37 @@ class Downloader:
 
     def get_video_info(self, url: str) -> VideoInfo:
         """Fetch video metadata without downloading."""
-        ydl_opts = self._get_ydl_opts({"skip_download": True})
-        ydl_opts.pop("format", None)  # no format validation during metadata fetch
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return VideoInfo(info)
-        except Exception as err:
-            # Fallback if cookiesfrombrowser caused failure
-            if "cookiesfrombrowser" in ydl_opts:
-                logger.warning(f"Metadata fetch with browser cookies failed ({err}). Retrying without browser cookies...")
-                del ydl_opts["cookiesfrombrowser"]
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        cookies_path = self.cookies_file_path or self.default_cookies_file_path
+        attempts = [
+            {"client": "android_vr", "cookiefile": None},
+            {"client": "web", "cookiefile": cookies_path},
+            {"client": "ios", "cookiefile": None},
+            {"client": None, "cookiefile": None},
+        ]
+        last_error = None
+        for attempt, attempt_cfg in enumerate(attempts, start=1):
+            try:
+                opts = self._get_ydl_opts({"skip_download": True, "format": "best"})
+                opts.pop("cookiesfrombrowser", None)
+                opts.pop("cookiefile", None)
+                if attempt_cfg["client"]:
+                    opts["extractor_args"] = {"youtube": {"player_client": [attempt_cfg["client"]]}}
+                else:
+                    opts.pop("extractor_args", None)
+                if attempt_cfg["cookiefile"]:
+                    opts["cookiefile"] = attempt_cfg["cookiefile"]
+                logger.info(
+                    f"Metadata attempt {attempt}: client={attempt_cfg['client'] or 'default'} "
+                    f"cookies={'yes' if attempt_cfg['cookiefile'] else 'no'}"
+                )
+                with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=False)
                     return VideoInfo(info)
-            cookies_path = self.cookies_file_path or self.default_cookies_file_path
-            if cookies_path:
-                logger.warning(f"Metadata fetch without cookies failed ({err}). Retrying web client with saved cookies...")
-                fallback_opts = self._get_ydl_opts({
-                    "skip_download": True,
-                    "extractor_args": {"youtube": {"player_client": ["web"]}},
-                    "cookiefile": cookies_path,
-                })
-                fallback_opts.pop("format", None)
-                fallback_opts.pop("cookiesfrombrowser", None)
-                with yt_dlp.YoutubeDL(fallback_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    return VideoInfo(info)
-            raise
+            except Exception as err:
+                last_error = err
+                logger.warning(f"Metadata attempt {attempt} failed: {err}")
+                continue
+        raise last_error
 
     def download_video(
         self,
