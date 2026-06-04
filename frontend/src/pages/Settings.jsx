@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Settings as SettingsIcon, Cookie, CheckCircle2, Trash2, Save, Loader2, AlertTriangle } from 'lucide-react'
-import { getCookiesStatus, saveCookies, deleteCookies } from '@/lib/api'
+import { Settings as SettingsIcon, Cookie, CheckCircle2, Trash2, Save, Loader2, AlertTriangle, Wifi } from 'lucide-react'
+import { getCookiesStatus, saveCookies, deleteCookies, healthCheck, API_BASE } from '@/lib/api'
+import { loadDefaults, saveDefaults, resetDefaults, defaultSettings } from '@/lib/settings'
 import toast from 'react-hot-toast'
 
 export default function Settings() {
@@ -9,6 +10,8 @@ export default function Settings() {
   const [status, setStatus] = useState(null)  // {saved: bool}
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [health, setHealth] = useState(null)
+  const [defaults, setDefaults] = useState(loadDefaults())
 
   useEffect(() => {
     getCookiesStatus()
@@ -16,6 +19,16 @@ export default function Settings() {
       .catch(() => setStatus({ saved: false }))
       .finally(() => setLoading(false))
   }, [])
+
+  const checkHealth = async () => {
+    setHealth({ loading: true })
+    try {
+      const data = await healthCheck()
+      setHealth({ ok: true, data })
+    } catch {
+      setHealth({ ok: false })
+    }
+  }
 
   const handleSave = async () => {
     if (!cookiesText.trim()) return toast.error('Paste your cookies text first')
@@ -34,6 +47,21 @@ export default function Settings() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const updateDefault = (key, value) => {
+    setDefaults(prev => ({ ...prev, [key]: value }))
+  }
+
+  const handleSaveDefaults = () => {
+    saveDefaults(defaults)
+    toast.success('Default job settings saved')
+  }
+
+  const handleResetDefaults = () => {
+    resetDefaults()
+    setDefaults(defaultSettings)
+    toast.success('Factory defaults restored')
   }
 
   const handleDelete = async () => {
@@ -60,6 +88,30 @@ export default function Settings() {
           Settings
         </h1>
         <p className="text-slate-400 mt-1">Configure global backend settings for all jobs.</p>
+      </div>
+
+      <div className="glass rounded-2xl p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Wifi className="w-5 h-5 text-brand-400" />
+          <h2 className="text-white font-bold text-lg">Backend Connection</h2>
+        </div>
+        <div className="rounded-xl bg-surface-900 border border-white/10 p-3 text-xs font-mono text-slate-300 break-all">
+          {API_BASE}
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+          <button onClick={checkHealth} className="btn-primary flex items-center justify-center gap-2 px-5 py-3">
+            {health?.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+            Check Health
+          </button>
+          {health?.ok && (
+            <span className="text-green-400 text-sm font-semibold">
+              Online - Groq {health.data?.groq_configured ? 'configured' : 'missing'}
+            </span>
+          )}
+          {health && !health.loading && !health.ok && (
+            <span className="text-yellow-400 text-sm font-semibold">Server may be waking up. Try again in 30-90s.</span>
+          )}
+        </div>
       </div>
 
       {/* YouTube Cookies Card */}
@@ -126,6 +178,75 @@ export default function Settings() {
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           {saving ? 'Saving...' : 'Save to Server'}
         </button>
+      </div>
+
+      <div className="glass rounded-2xl p-6 space-y-5">
+        <div className="flex items-center gap-2">
+          <SettingsIcon className="w-5 h-5 text-brand-400" />
+          <h2 className="text-white font-bold text-lg">Default Job Settings</h2>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label className="space-y-1">
+            <span className="text-xs font-semibold text-slate-400 uppercase">Min Duration</span>
+            <input type="number" min="15" max="60" value={defaults.clipMinDuration}
+              onChange={e => updateDefault('clipMinDuration', Number(e.target.value))}
+              className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white" />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-semibold text-slate-400 uppercase">Max Duration</span>
+            <input type="number" min="30" max="90" value={defaults.clipMaxDuration}
+              onChange={e => updateDefault('clipMaxDuration', Number(e.target.value))}
+              className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white" />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-semibold text-slate-400 uppercase">Clips</span>
+            <input type="number" min="1" max="10" value={defaults.numClips}
+              onChange={e => updateDefault('numClips', Number(e.target.value))}
+              className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white" />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-semibold text-slate-400 uppercase">Resolution</span>
+            <select value={defaults.resolution} onChange={e => updateDefault('resolution', e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white">
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+              <option value="480p">480p</option>
+              <option value="best">Best</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-semibold text-slate-400 uppercase">Caption Style</span>
+            <select value={defaults.captionStyle} onChange={e => updateDefault('captionStyle', e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white">
+              <option value="hormozi">Hormozi</option>
+              <option value="gadzhi">Gadzhi</option>
+              <option value="ali_abdaal">Ali Abdaal</option>
+              <option value="mrbeast">MrBeast</option>
+              <option value="minimal">Minimal</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-semibold text-slate-400 uppercase">Background</span>
+            <select value={defaults.backgroundType} onChange={e => updateDefault('backgroundType', e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white">
+              <option value="none">None</option>
+              <option value="subway">Subway</option>
+              <option value="minecraft">Minecraft</option>
+              <option value="gta">GTA</option>
+              <option value="templerun">Temple Run</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button onClick={handleSaveDefaults} className="btn-primary flex items-center justify-center gap-2 px-6 py-3">
+            <Save className="w-4 h-4" /> Save Defaults
+          </button>
+          <button onClick={handleResetDefaults} className="btn-ghost flex items-center justify-center gap-2 px-6 py-3">
+            <Trash2 className="w-4 h-4" /> Reset to Factory Defaults
+          </button>
+        </div>
       </div>
     </motion.div>
   )

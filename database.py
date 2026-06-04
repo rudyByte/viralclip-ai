@@ -86,6 +86,12 @@ class Clip(Base):
     layout_template = Column(String, default="split_50_50")
     status = Column(String, default="pending")  # pending|processing|done|error
 
+    # Platform-ready publishing metadata
+    youtube_title = Column(Text, nullable=True)
+    youtube_description = Column(Text, nullable=True)
+    instagram_caption = Column(Text, nullable=True)
+    hook_score = Column(Integer, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -173,6 +179,24 @@ async def init_db():
             except Exception as e:
                 db_logger.error(f"Failed to add 'layout_template' to 'clips': {e}")
                 await session.rollback()
+
+        for column_name, column_sql in [
+            ("youtube_title", "ALTER TABLE clips ADD COLUMN youtube_title TEXT"),
+            ("youtube_description", "ALTER TABLE clips ADD COLUMN youtube_description TEXT"),
+            ("instagram_caption", "ALTER TABLE clips ADD COLUMN instagram_caption TEXT"),
+            ("hook_score", "ALTER TABLE clips ADD COLUMN hook_score INTEGER"),
+        ]:
+            try:
+                await session.execute(text(f"SELECT {column_name} FROM clips LIMIT 1"))
+            except Exception:
+                await session.rollback()
+                try:
+                    await session.execute(text(column_sql))
+                    await session.commit()
+                    db_logger.info(f"Added column '{column_name}' to 'clips' table.")
+                except Exception as e:
+                    db_logger.error(f"Failed to add '{column_name}' to 'clips': {e}")
+                    await session.rollback()
 
 
 async def get_db():

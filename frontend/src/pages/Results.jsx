@@ -76,6 +76,7 @@ export default function Results() {
   const [logs, setLogs] = useState([])
   const [copiedText, setCopiedText] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
+  const [contentTab, setContentTab] = useState('youtube')
 
   // Custom video player states
   const [playing, setPlaying] = useState(false)
@@ -212,6 +213,7 @@ export default function Results() {
   const handleSelectClip = async (clip) => {
     setActiveClip(clip)
     setHooks(null)
+    setContentTab('youtube')
     setHooksLoading(true)
     setPlaying(false)
     setRegenStyle(clip.caption_style)
@@ -771,6 +773,77 @@ export default function Results() {
                       <p className="text-xs text-slate-500 italic">No AI metadata generated for this clip.</p>
                     )}
                   </div>
+
+                  {(hooks?.metadata || activeClip?.metadata) && (
+                    <div className="border-t border-white/[0.06] pt-5 space-y-4">
+                      <h3 className="font-bold text-white text-base flex items-center gap-2">
+                        <Youtube className="w-5 h-5 text-green-400" />
+                        <span>Publishing Content</span>
+                      </h3>
+                      <div className="glass rounded-2xl p-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          {['youtube', 'instagram'].map(tab => (
+                            <button
+                              key={tab}
+                              onClick={() => setContentTab(tab)}
+                              className={`py-2.5 rounded-xl text-sm font-bold capitalize transition-all ${
+                                contentTab === tab ? 'bg-green-500 text-black' : 'bg-surface-900 text-slate-300 border border-white/10'
+                              }`}
+                            >
+                              {tab}
+                            </button>
+                          ))}
+                        </div>
+
+                        {(() => {
+                          const meta = hooks?.metadata || activeClip?.metadata || {}
+                          const ytTitle = meta.youtube_title || hooks?.title || ''
+                          const ytDesc = meta.youtube_description || ''
+                          const igCaption = meta.instagram_caption || hooks?.caption || ''
+
+                          if (contentTab === 'instagram') {
+                            return (
+                              <div className="space-y-3">
+                                <label className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">Instagram Caption</label>
+                                <textarea readOnly value={igCaption} rows={8}
+                                  className="w-full rounded-xl bg-black/30 border border-white/10 p-3 text-slate-200 font-mono text-xs resize-none" />
+                                <button onClick={() => handleCopy(igCaption, 'instagram_caption')}
+                                  className="w-full min-h-[44px] rounded-xl bg-green-500 text-black font-extrabold flex items-center justify-center gap-2">
+                                  {copiedText === 'instagram_caption' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                  {copiedText === 'instagram_caption' ? 'Copied!' : 'Copy Instagram Caption'}
+                                </button>
+                              </div>
+                            )
+                          }
+
+                          return (
+                            <div className="space-y-4">
+                              <div className="space-y-2">
+                                <label className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">YouTube Title</label>
+                                <input readOnly value={ytTitle}
+                                  className="w-full rounded-xl bg-black/30 border border-white/10 p-3 text-slate-200 font-mono text-xs" />
+                                <button onClick={() => handleCopy(ytTitle, 'youtube_title')}
+                                  className="w-full min-h-[44px] rounded-xl bg-green-500 text-black font-extrabold flex items-center justify-center gap-2">
+                                  {copiedText === 'youtube_title' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                  {copiedText === 'youtube_title' ? 'Copied!' : 'Copy YouTube Title'}
+                                </button>
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">YouTube Description</label>
+                                <textarea readOnly value={ytDesc} rows={10}
+                                  className="w-full rounded-xl bg-black/30 border border-white/10 p-3 text-slate-200 font-mono text-xs resize-none" />
+                                <button onClick={() => handleCopy(ytDesc, 'youtube_description')}
+                                  className="w-full min-h-[44px] rounded-xl bg-green-500 text-black font-extrabold flex items-center justify-center gap-2">
+                                  {copiedText === 'youtube_description' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                  {copiedText === 'youtube_description' ? 'Copied!' : 'Copy YouTube Description'}
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

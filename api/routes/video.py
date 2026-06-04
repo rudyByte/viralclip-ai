@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from pydantic import BaseModel, HttpUrl
-from typing import Optional
+from typing import Optional, List
 
 from database import get_db, Job, Clip, Hook
 from core.pipeline import run_pipeline
@@ -28,7 +28,8 @@ _running_jobs: set[str] = set()
 
 
 class ProcessRequest(BaseModel):
-    youtube_url: str
+    youtube_url: Optional[str] = None
+    youtube_urls: Optional[List[str]] = None
     clip_min_duration: int = 30
     clip_max_duration: int = 60
     num_clips: int = 5
@@ -82,10 +83,15 @@ async def process_video(
     req: ProcessRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Start the full ViralClip AI processing pipeline (supports single or comma/newline separated list of URLs)."""
-    urls = [u.strip() for u in req.youtube_url.replace("\n", ",").split(",") if u.strip()]
+    """Start the full ViralClip AI processing pipeline."""
+    raw_urls = req.youtube_urls if req.youtube_urls else []
+    if req.youtube_url:
+        raw_urls.extend(req.youtube_url.replace("\n", ",").split(","))
+    urls = [u.strip() for u in raw_urls if u and u.strip()][:10]
     if not urls:
         raise HTTPException(status_code=400, detail="No valid YouTube URLs provided")
+    if req.num_clips < 1 or req.num_clips > 10:
+        raise HTTPException(status_code=400, detail="num_clips must be between 1 and 10")
 
     job_ids = []
     for url in urls:
@@ -131,9 +137,24 @@ async def get_job_status(job_id: str, db: AsyncSession = Depends(get_db)):
     clips_result = await db.execute(
         select(Clip).where(Clip.job_id == job_id, Clip.status == "done")
     )
-    clip_count = len(clips_result.scalars().all())
+    completed_clips = clips_result.scalars().all()
+    clip_count = len(completed_clips)
 
-    return job_to_response(job, clip_count)
+    response = job_to_response(job, clip_count).model_dump()
+    if job.status == "done":
+        response["clips"] = [
+            {
+                "id": clip.id,
+                "metadata": {
+                    "youtube_title": getattr(clip, "youtube_title", None) or "",
+                    "youtube_description": getattr(clip, "youtube_description", None) or "",
+                    "instagram_caption": getattr(clip, "instagram_caption", None) or "",
+                    "hook_score": getattr(clip, "hook_score", None) or 0,
+                },
+            }
+            for clip in completed_clips
+        ]
+    return response
 
 
 @router.get("/jobs")

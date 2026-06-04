@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import Sidebar from '@/components/Sidebar'
 import Dashboard from '@/pages/Dashboard'
@@ -7,6 +8,11 @@ import Results from '@/pages/Results'
 import Settings from '@/pages/Settings'
 
 export default function App() {
+  useEffect(() => {
+    const apiUrl = import.meta.env.VITE_API_URL
+    if (apiUrl) fetch(`${apiUrl}/health`).catch(() => {})
+  }, [])
+
   return (
     <div className="flex min-h-screen bg-surface-900">
       {/* Mesh animated background */}

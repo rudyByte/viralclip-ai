@@ -21,7 +21,7 @@ CRITICAL REQUIREMENTS:
 1. Target Duration: Each segment must be strictly between {min_duration} and {max_duration} seconds long (duration = end_time - start_time).
 2. Hook/Start: The start_time must mark a strong hook or the beginning of an interesting idea.
 3. Logical Ending: The end_time must be a logical cut-off point (e.g., at the end of a sentence, a punchline, or a completed thought). Do not cut off mid-phrase, mid-sentence, or in a way that leaves the viewer hanging without context.
-4. Timestamps: Return start_time and end_time as raw float seconds from the transcript timestamps.
+4. Timestamps: All timestamps are in RAW SECONDS (e.g. 180.0, not 3:00). Return start_time and end_time as float seconds.
 5. Multilingual support: The transcript might be in English, Hindi, Gujarati, or any other language. Analyze it carefully to find the best viral segments. The reason must be in English, but hook_words should be in the original language.
 
 TRANSCRIPT:
@@ -251,7 +251,7 @@ class GroqAnalyzer:
                 await asyncio.sleep(2.0)
 
             batch_text = "\n".join(
-                f"[{c['start']:.2f}] {self._compress_chunk_text(c['text'])}"
+                f"[{c['start']:.2f}s] {self._compress_chunk_text(c['text'])}"
                 for c in batch
             )
 
@@ -363,3 +363,59 @@ class GroqAnalyzer:
         except Exception as e:
             logger.error(f"Hook generation failed: {e} | Raw: {raw[:200]}")
             return HookContent([], [], [], [], "")
+
+    async def generate_clip_metadata(
+        self,
+        moment: ViralMoment,
+        video_title: str,
+        video_channel: str = "Unknown",
+    ) -> dict:
+        """Generate platform-ready title, description, and caption for one clip."""
+        prompt = f"""
+You are a viral short-form content strategist.
+
+Original video: "{video_title}" by {video_channel}
+Clip topic: {moment.reason}
+Hook words: {moment.hook_words}
+Clip duration: {moment.duration:.0f} seconds
+Clip range: {moment.start_time:.1f}s to {moment.end_time:.1f}s
+
+Generate metadata. Respond ONLY with valid JSON, no markdown:
+{{
+  "youtube_title": "<max 70 chars, curiosity-gap hook, no fake clickbait>",
+  "youtube_description": "<hook line, context line, CTA line, then clip time, hashtags, and fair use notice>",
+  "instagram_caption": "<2-3 punchy lines plus relevant hashtags>",
+  "hook_score": <int 1-10>
+}}
+"""
+        raw = ""
+        try:
+            raw = await self._call_groq_with_retry(
+                model=self.hook_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.8,
+                max_tokens=700,
+            )
+            data = json.loads(self._clean_json_response(raw))
+            youtube_title = str(data.get("youtube_title") or video_title or "Viral Clip")[:70]
+            return {
+                "youtube_title": youtube_title,
+                "youtube_description": str(data.get("youtube_description") or ""),
+                "instagram_caption": str(data.get("instagram_caption") or ""),
+                "hook_score": int(data.get("hook_score") or 0),
+            }
+        except Exception as e:
+            logger.error(f"Clip metadata generation failed: {e} | Raw: {raw[:200]}")
+            safe_title = (moment.hook_words or moment.reason or video_title or "Viral Clip")[:70]
+            return {
+                "youtube_title": safe_title,
+                "youtube_description": (
+                    f"{moment.reason}\n\n"
+                    f"Clip: {moment.start_time:.1f}s - {moment.end_time:.1f}s from {video_title}.\n\n"
+                    "#Shorts #viral #clips\n\n"
+                    "Fair Use Notice: This clip is used for educational/commentary purposes. "
+                    f"Original content belongs to {video_channel}."
+                ),
+                "instagram_caption": f"{moment.reason}\n\n#reels #shorts #viral",
+                "hook_score": 0,
+            }

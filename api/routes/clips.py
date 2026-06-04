@@ -50,6 +50,12 @@ def clip_to_dict(clip: Clip) -> dict:
         "caption_style": clip.caption_style,
         "background_type": clip.background_type,
         "layout_template": getattr(clip, "layout_template", "split_50_50") or "split_50_50",
+        "metadata": {
+            "youtube_title": getattr(clip, "youtube_title", None) or "",
+            "youtube_description": getattr(clip, "youtube_description", None) or "",
+            "instagram_caption": getattr(clip, "instagram_caption", None) or "",
+            "hook_score": getattr(clip, "hook_score", None) or 0,
+        },
         "status": clip.status,
         "has_export": clip.export_path is not None and Path(clip.export_path or "").exists(),
         "created_at": clip.created_at.isoformat() if clip.created_at else "",
@@ -120,6 +126,9 @@ async def get_clip_hooks(clip_id: str, db: AsyncSession = Depends(get_db)):
         except (json.JSONDecodeError, TypeError):
             hashtags = []
 
+    clip_result = await db.execute(select(Clip).where(Clip.id == clip_id))
+    clip = clip_result.scalar_one_or_none()
+
     return {
         "clip_id": clip_id,
         "title": hook.title,
@@ -127,6 +136,28 @@ async def get_clip_hooks(clip_id: str, db: AsyncSession = Depends(get_db)):
         "caption": hook.caption,
         "hashtags": hashtags,
         "thumbnail_text": hook.thumbnail_text,
+        "metadata": {
+            "youtube_title": getattr(clip, "youtube_title", None) or hook.title or "",
+            "youtube_description": getattr(clip, "youtube_description", None) or "",
+            "instagram_caption": getattr(clip, "instagram_caption", None) or hook.caption or "",
+            "hook_score": getattr(clip, "hook_score", None) or 0,
+        },
+    }
+
+
+@router.get("/{clip_id}/metadata")
+async def get_clip_metadata(clip_id: str, db: AsyncSession = Depends(get_db)):
+    """Get platform-ready publishing metadata for a clip."""
+    result = await db.execute(select(Clip).where(Clip.id == clip_id))
+    clip = result.scalar_one_or_none()
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return {
+        "clip_id": clip_id,
+        "youtube_title": getattr(clip, "youtube_title", None) or "",
+        "youtube_description": getattr(clip, "youtube_description", None) or "",
+        "instagram_caption": getattr(clip, "instagram_caption", None) or "",
+        "hook_score": getattr(clip, "hook_score", None) or 0,
     }
 
 
@@ -185,4 +216,3 @@ async def preview_clip(clip_id: str, db: AsyncSession = Depends(get_db)):
         path=export_path,
         media_type="video/mp4",
     )
-

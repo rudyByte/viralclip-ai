@@ -47,6 +47,12 @@ class Downloader:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.resolution = resolution
+        default_cookies = os.environ.get("YT_DLP_COOKIES_FILE", "/app/data/cookies.txt")
+        self.default_cookies_file_path = (
+            default_cookies
+            if os.path.exists(default_cookies) and os.path.getsize(default_cookies) > 100
+            else None
+        )
         
         # Save custom cookies to a file in the job temporary directory if provided
         self.cookies_file_path = None
@@ -104,16 +110,9 @@ class Downloader:
             }
         }
         
-        # Only use cookies if the user explicitly uploaded job-specific ones.
-        # The default cookies.txt in the repo is often stale and actively causes
-        # 'Sign in to confirm you are not a bot' errors with the web client.
-        # android_vr client handles public videos without any cookies from datacenter IPs.
-        cookies_file = None
-        if self.cookies_file_path and os.path.exists(self.cookies_file_path):
-            cookies_file = self.cookies_file_path
-            opts["cookiefile"] = cookies_file
-            logger.info(f"Using job-specific cookies file: {cookies_file}")
-        elif not os.environ.get("RUNNING_IN_DOCKER"):
+        # Do not attach cookies to primary android_vr opts. Stale cookies can
+        # trigger bot checks; saved cookies are only used in explicit web fallback.
+        if not os.environ.get("RUNNING_IN_DOCKER"):
             # Try using cookies from browser when running locally (not in Docker)
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
@@ -134,10 +133,7 @@ class Downloader:
     def get_video_info(self, url: str) -> VideoInfo:
         """Fetch video metadata without downloading."""
         ydl_opts = self._get_ydl_opts({"skip_download": True})
-        # Remove format restriction entirely — yt-dlp validates format even for
-        # metadata-only calls (download=False). Without a format key it uses
-        # internal defaults and never raises 'format not available'.
-        ydl_opts.pop("format", None)
+        ydl_opts.pop("format", None)  # no format validation during metadata fetch
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -148,6 +144,19 @@ class Downloader:
                 logger.warning(f"Metadata fetch with browser cookies failed ({err}). Retrying without browser cookies...")
                 del ydl_opts["cookiesfrombrowser"]
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    return VideoInfo(info)
+            cookies_path = self.cookies_file_path or self.default_cookies_file_path
+            if cookies_path:
+                logger.warning(f"Metadata fetch without cookies failed ({err}). Retrying web client with saved cookies...")
+                fallback_opts = self._get_ydl_opts({
+                    "skip_download": True,
+                    "extractor_args": {"youtube": {"player_client": ["web"]}},
+                    "cookiefile": cookies_path,
+                })
+                fallback_opts.pop("format", None)
+                fallback_opts.pop("cookiesfrombrowser", None)
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
                     return VideoInfo(info)
             raise
@@ -192,35 +201,38 @@ class Downloader:
 
         # Escalating format fallbacks – each attempt is broader than the previous.
         # This guarantees we always get *something* even if the first choice isn't available.
-        FORMAT_FALLBACKS = [
-            None,                       # attempt 1: use format from _get_ydl_opts (resolution-specific)
-            "bestvideo+bestaudio/best", # attempt 2: any best video+audio combo
-            "best",                     # attempt 3: single stream / whatever exists
+        cookies_path = self.cookies_file_path or self.default_cookies_file_path
+        attempts = [
+            {"format": None, "client": "android_vr", "cookiefile": None},
+            {"format": "bestvideo+bestaudio/best", "client": "web", "cookiefile": cookies_path},
+            {"format": "best", "client": "ios", "cookiefile": None},
         ]
-        max_attempts = len(FORMAT_FALLBACKS)
 
-        for attempt in range(1, max_attempts + 1):
+        for attempt, attempt_cfg in enumerate(attempts, start=1):
             try:
                 current_opts = ydl_opts.copy()
-                # Strip browser cookies on retry to avoid that triggering its own error
-                if attempt > 1 and "cookiesfrombrowser" in current_opts:
-                    del current_opts["cookiesfrombrowser"]
-                # Override format on retry attempts
-                fallback_fmt = FORMAT_FALLBACKS[attempt - 1]
-                if fallback_fmt is not None:
-                    current_opts["format"] = fallback_fmt
-                    logger.warning(f"Attempt {attempt}: using broader format selector '{fallback_fmt}'")
+                current_opts.pop("cookiesfrombrowser", None)
+                current_opts.pop("cookiefile", None)
+                current_opts["extractor_args"] = {"youtube": {"player_client": [attempt_cfg["client"]]}}
+                if attempt_cfg["format"] is not None:
+                    current_opts["format"] = attempt_cfg["format"]
+                if attempt_cfg["cookiefile"]:
+                    current_opts["cookiefile"] = attempt_cfg["cookiefile"]
+                logger.info(
+                    f"Download attempt {attempt}: client={attempt_cfg['client']} "
+                    f"cookies={'yes' if attempt_cfg['cookiefile'] else 'no'}"
+                )
 
                 with yt_dlp.YoutubeDL(current_opts) as ydl:
                     ydl.download([url])
                 break  # Success
             except Exception as dl_err:
-                if attempt < max_attempts:
+                if attempt < len(attempts):
                     wait = 8 * attempt
                     logger.warning(f"Download attempt {attempt} failed: {dl_err}. Retrying in {wait}s...")
                     time.sleep(wait)
                 else:
-                    logger.error(f"All {max_attempts} download attempts failed.")
+                    logger.error(f"All {len(attempts)} download attempts failed.")
                     raise
 
         logger.info(f"Video downloaded: {video_path}")

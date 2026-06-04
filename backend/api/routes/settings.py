@@ -4,7 +4,7 @@ POST /api/settings/cookies  — save YouTube cookies to server
 GET  /api/settings/cookies  — check if cookies are saved
 DELETE /api/settings/cookies — remove saved cookies
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
 import os
@@ -21,19 +21,24 @@ class CookiesPayload(BaseModel):
 @router.get("/cookies")
 def get_cookies_status():
     exists = COOKIES_PATH.exists() and COOKIES_PATH.stat().st_size > 100
-    return {"saved": exists, "path": str(COOKIES_PATH) if exists else None}
+    return {
+        "saved": exists,
+        "source": "user" if exists else None,
+        "size_bytes": COOKIES_PATH.stat().st_size if exists else 0,
+    }
 
 
 @router.post("/cookies")
 def save_cookies(payload: CookiesPayload):
-    if not payload.cookies or len(payload.cookies.strip()) < 50:
-        return {"success": False, "error": "Cookies text too short or empty"}
+    cookies_text = (payload.cookies or "").strip()
+    if len(cookies_text) < 50 or ("# Netscape" not in cookies_text and ".youtube.com" not in cookies_text):
+        raise HTTPException(status_code=400, detail="Invalid cookies format. Paste Netscape cookies.txt content.")
     try:
         COOKIES_PATH.parent.mkdir(parents=True, exist_ok=True)
-        COOKIES_PATH.write_text(payload.cookies.strip(), encoding="utf-8")
-        return {"success": True, "message": "Cookies saved. All future jobs will use them automatically."}
+        COOKIES_PATH.write_text(cookies_text, encoding="utf-8")
+        return {"success": True, "saved": True, "message": "Cookies saved. All future jobs will use them automatically."}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/cookies")
@@ -41,9 +46,9 @@ def delete_cookies():
     try:
         if COOKIES_PATH.exists():
             COOKIES_PATH.unlink()
-        return {"success": True, "message": "Cookies deleted."}
+        return {"success": True, "deleted": True, "message": "Cookies deleted."}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/logs")

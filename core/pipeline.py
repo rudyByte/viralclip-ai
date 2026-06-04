@@ -80,6 +80,7 @@ async def run_pipeline(
     export_dir.mkdir(parents=True, exist_ok=True)
 
     yt_title = "YouTube Video"  # Safe default
+    yt_channel = "Unknown"
 
     try:
         # ── Load existing job record for checkpoint data ───────────────
@@ -126,6 +127,7 @@ async def run_pipeline(
                         )
                         await db.commit()
                     yt_title = info.title
+                    yt_channel = info.channel
                 except Exception as ex:
                     logger.warning(f"[{job_id}] Failed to fetch info for cached download: {ex}")
                     yt_title = "YouTube Video"
@@ -139,12 +141,14 @@ async def run_pipeline(
                     )
                     await db.commit()
                 yt_title = job.title or "YouTube Video"
+                yt_channel = job.channel or "Unknown"
             
             await update_job_status(job_id, "downloading", 20, "Video and audio loaded from disk, resuming...")
         elif video_path and audio_path and os.path.exists(video_path) and os.path.exists(audio_path):
             logger.info(f"[{job_id}] ✓ Step 1 checkpoint: video/audio already on disk, skipping download.")
             await update_job_status(job_id, "downloading", 20, "Video already downloaded, resuming...")
             yt_title = job.title or "YouTube Video"
+            yt_channel = job.channel or "Unknown"
         else:
             await update_job_status(job_id, "downloading", 5, "Downloading video...")
             logger.info(f"[{job_id}] Step 1: Downloading {youtube_url}")
@@ -152,6 +156,7 @@ async def run_pipeline(
             downloader = Downloader(str(temp_dir), resolution=resolution, cookies=cookies)
             info = await downloader.get_video_info_async(youtube_url)
             yt_title = info.title
+            yt_channel = info.channel
 
             async with AsyncSessionLocal() as db:
                 from sqlalchemy import update as sq_update
@@ -390,6 +395,7 @@ async def run_pipeline(
                 # Generate hooks with quality model
                 clip_text = " ".join(w.word for w in words)
                 hooks = await hook_analyzer.generate_hooks(clip_text, yt_title)
+                metadata = await hook_analyzer.generate_clip_metadata(moment, yt_title, yt_channel)
 
                 # Compute final virality score
                 final_score = scorer.compute_score(moment.scores)
@@ -420,6 +426,10 @@ async def run_pipeline(
                         caption_style=caption_style,
                         background_type=background_type,
                         layout_template=layout_template,
+                        youtube_title=metadata.get("youtube_title", ""),
+                        youtube_description=metadata.get("youtube_description", ""),
+                        instagram_caption=metadata.get("instagram_caption", ""),
+                        hook_score=metadata.get("hook_score", 0),
                         status="done",
                     )
                     db.add(clip)

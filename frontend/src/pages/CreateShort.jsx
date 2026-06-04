@@ -6,6 +6,7 @@ import {
   ChevronRight, ArrowLeft, Loader2 
 } from 'lucide-react'
 import { processVideo } from '@/lib/api'
+import { loadDefaults, saveDefaults } from '@/lib/settings'
 import toast from 'react-hot-toast'
 
 const CAPTION_STYLES = [
@@ -33,16 +34,28 @@ const LAYOUT_TEMPLATES = [
 
 export default function CreateShort() {
   const navigate = useNavigate()
+  const defaults = loadDefaults()
   const [url, setUrl] = useState('')
-  const [minDuration, setMinDuration] = useState(30)
-  const [maxDuration, setMaxDuration] = useState(60)
-  const [numClips, setNumClips] = useState(5)
-  const [captionStyle, setCaptionStyle] = useState('hormozi')
-  const [backgroundType, setBackgroundType] = useState('subway')
-  const [layoutTemplate, setLayoutTemplate] = useState('split_50_50')
-  const [resolution, setResolution] = useState('1080p')
+  const [minDuration, setMinDuration] = useState(defaults.clipMinDuration)
+  const [maxDuration, setMaxDuration] = useState(defaults.clipMaxDuration)
+  const [numClips, setNumClips] = useState(defaults.numClips)
+  const [captionStyle, setCaptionStyle] = useState(defaults.captionStyle)
+  const [backgroundType, setBackgroundType] = useState(defaults.backgroundType)
+  const [layoutTemplate, setLayoutTemplate] = useState(defaults.layoutTemplate)
+  const [resolution, setResolution] = useState(defaults.resolution)
   const [cookies, setCookies] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const urlCount = url.split(/[\n,]+/).map(u => u.trim()).filter(Boolean).length
+
+  const currentDefaults = () => ({
+    clipMinDuration: parseInt(minDuration),
+    clipMaxDuration: parseInt(maxDuration),
+    numClips: parseInt(numClips),
+    captionStyle,
+    backgroundType,
+    layoutTemplate,
+    resolution,
+  })
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -66,7 +79,7 @@ export default function CreateShort() {
     setSubmitting(true)
     try {
       const response = await processVideo({
-        youtube_url: urls.join(','),
+        youtube_urls: urls.slice(0, 10),
         clip_min_duration: parseInt(minDuration),
         clip_max_duration: parseInt(maxDuration),
         num_clips: parseInt(numClips),
@@ -136,7 +149,7 @@ export default function CreateShort() {
               1. Paste YouTube URL(s)
             </label>
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              Separate multiple links with comlines or newlines
+              {urlCount} URL(s) detected - max 10
             </span>
           </div>
           <div className="relative">
@@ -355,6 +368,17 @@ export default function CreateShort() {
 
         {/* Submit */}
         <div className="flex items-center justify-stretch sm:justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              saveDefaults(currentDefaults())
+              toast.success('Defaults saved')
+            }}
+            disabled={submitting}
+            className="btn-ghost w-full sm:w-auto px-6 py-4 mr-0 sm:mr-3 mb-3 sm:mb-0"
+          >
+            Save as Default
+          </button>
           <button
             type="submit"
             disabled={submitting}

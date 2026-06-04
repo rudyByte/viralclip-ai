@@ -4,9 +4,22 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: `${API_BASE_URL}/api`,
-  timeout: 30000,
+  timeout: 45000,
   headers: { 'Content-Type': 'application/json' },
 })
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config || {}
+    config.__retryCount = config.__retryCount || 0
+    const canRetry = !config.__noRetry && config.__retryCount < 2 && (!error.response || error.response.status >= 500)
+    if (!canRetry) throw error
+    config.__retryCount += 1
+    await new Promise(resolve => setTimeout(resolve, 2000 * config.__retryCount))
+    return api(config)
+  }
+)
 
 // ── Video / Jobs ─────────────────────────────────────────────────
 export const processVideo = (data) =>
@@ -30,6 +43,9 @@ export const getClip = (clipId) =>
 
 export const getClipHooks = (clipId) =>
   api.get(`/clips/${clipId}/hooks`).then((r) => r.data)
+
+export const getClipMetadata = (clipId) =>
+  api.get(`/clips/${clipId}/metadata`).then((r) => r.data)
 
 export const regenerateClip = (clipId, data) =>
   api.post(`/clips/${clipId}/regenerate`, data).then((r) => r.data)
@@ -60,7 +76,7 @@ export const deleteCookies = () =>
 
 // ── WebSocket helper ──────────────────────────────────────────────
 export const createJobSocket = (jobId, onMessage, onClose) => {
-  const wsBase = API_BASE_URL.replace(/^http/, 'ws')
+  const wsBase = API_BASE_URL.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')
   const url = `${wsBase}/ws/job/${jobId}`
   const ws = new WebSocket(url)
   ws.onmessage = (e) => onMessage(JSON.parse(e.data))
@@ -68,5 +84,7 @@ export const createJobSocket = (jobId, onMessage, onClose) => {
   ws.onerror = (e) => console.error('WS error:', e)
   return ws
 }
+
+export const API_BASE = API_BASE_URL
 
 export default api
