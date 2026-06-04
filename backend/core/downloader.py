@@ -100,6 +100,9 @@ class Downloader:
             "fragment_retries": 15,
             "file_access_retries": 5,
             "nocheckcertificate": True,  # Bypass SSL certificate check drops
+            "legacyserverconnect": True,
+            "source_address": "0.0.0.0",
+            "impersonate": "chrome",
             "format": video_format,
             "extractor_args": {
                 "youtube": {
