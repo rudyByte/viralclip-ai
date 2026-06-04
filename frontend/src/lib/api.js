@@ -74,6 +74,15 @@ export const saveCookies = (cookies) =>
 export const deleteCookies = () =>
   api.delete('/settings/cookies').then((r) => r.data)
 
+export const getPoTokenStatus = () =>
+  api.get('/settings/potoken').then((r) => r.data)
+
+export const savePoToken = (poToken) =>
+  api.post('/settings/potoken', { po_token: poToken }).then((r) => r.data)
+
+export const deletePoToken = () =>
+  api.delete('/settings/potoken').then((r) => r.data)
+
 // ── WebSocket helper ──────────────────────────────────────────────
 export const createJobSocket = (jobId, onMessage, onClose) => {
   const wsBase = API_BASE_URL.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')

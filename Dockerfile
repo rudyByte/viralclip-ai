@@ -14,6 +14,7 @@ ENV EXPORT_DIR=/app/exports
 ENV ASSETS_DIR=/app/assets
 ENV MODELS_DIR=/app/models
 ENV RUNNING_IN_DOCKER=true
+ENV YT_DLP_PO_TOKEN_FILE=/app/data/po_token.txt
 
 # Set working directory inside container
 WORKDIR /app

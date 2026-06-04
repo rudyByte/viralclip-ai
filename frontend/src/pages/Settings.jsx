@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Settings as SettingsIcon, Cookie, CheckCircle2, Trash2, Save, Loader2, AlertTriangle, Wifi } from 'lucide-react'
-import { getCookiesStatus, saveCookies, deleteCookies, healthCheck, API_BASE } from '@/lib/api'
+import { getCookiesStatus, saveCookies, deleteCookies, getPoTokenStatus, savePoToken, deletePoToken, healthCheck, API_BASE } from '@/lib/api'
 import { loadDefaults, saveDefaults, resetDefaults, defaultSettings } from '@/lib/settings'
 import toast from 'react-hot-toast'
 
 export default function Settings() {
   const [cookiesText, setCookiesText] = useState('')
+  const [poTokenText, setPoTokenText] = useState('')
   const [status, setStatus] = useState(null)  // {saved: bool}
+  const [poTokenStatus, setPoTokenStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingPoToken, setSavingPoToken] = useState(false)
   const [health, setHealth] = useState(null)
   const [defaults, setDefaults] = useState(loadDefaults())
 
@@ -18,6 +21,9 @@ export default function Settings() {
       .then(setStatus)
       .catch(() => setStatus({ saved: false }))
       .finally(() => setLoading(false))
+    getPoTokenStatus()
+      .then(setPoTokenStatus)
+      .catch(() => setPoTokenStatus({ saved: false }))
   }, [])
 
   const checkHealth = async () => {
@@ -71,6 +77,35 @@ export default function Settings() {
       toast.success('Cookies removed')
     } catch {
       toast.error('Failed to delete cookies')
+    }
+  }
+
+  const handleSavePoToken = async () => {
+    if (!poTokenText.trim()) return toast.error('Paste your PO Token first')
+    setSavingPoToken(true)
+    try {
+      const res = await savePoToken(poTokenText)
+      if (res.success) {
+        toast.success('PO Token saved')
+        setPoTokenStatus({ saved: true })
+        setPoTokenText('')
+      } else {
+        toast.error(res.error || 'Failed to save PO Token')
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to save PO Token')
+    } finally {
+      setSavingPoToken(false)
+    }
+  }
+
+  const handleDeletePoToken = async () => {
+    try {
+      await deletePoToken()
+      setPoTokenStatus({ saved: false })
+      toast.success('PO Token removed')
+    } catch {
+      toast.error('Failed to delete PO Token')
     }
   }
 
@@ -177,6 +212,73 @@ export default function Settings() {
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           {saving ? 'Saving...' : 'Save to Server'}
+        </button>
+      </div>
+
+      <div className="glass rounded-2xl p-6 space-y-5">
+        <div className="flex items-center gap-2">
+          <Cookie className="w-5 h-5 text-brand-400" />
+          <h2 className="text-white font-bold text-lg">YouTube PO Token</h2>
+        </div>
+
+        {poTokenStatus?.saved ? (
+          <div className="flex items-center justify-between p-3 rounded-xl bg-green-500/10 border border-green-500/30">
+            <div className="flex items-center gap-2 text-green-400 text-sm font-semibold">
+              <CheckCircle2 className="w-4 h-4" />
+              PO Token saved on server. HF downloads will try mweb + PO Token fallback.
+            </div>
+            <button
+              onClick={handleDeletePoToken}
+              className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors ml-4"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Remove
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            No PO Token saved. HF may still hit YouTube datacenter bot blocks.
+          </div>
+        )}
+
+        <div className="space-y-2 text-sm text-slate-400">
+          <p className="font-semibold text-white text-sm">How to get a PO Token:</p>
+          <ol className="list-decimal list-inside space-y-1 ml-1">
+            <li>Open youtube.com in your desktop browser.</li>
+            <li>Open DevTools Console.</li>
+            <li>Run: <code className="text-xs bg-surface-900 px-1 py-0.5 rounded text-slate-200">(await (await fetch('/youtubei/v1/visitor_id')).json())</code></li>
+            <li>Paste the token value below. Prefixes like <code className="text-xs bg-surface-900 px-1 py-0.5 rounded text-slate-200">mweb.gvs+</code> are accepted.</li>
+          </ol>
+          <a
+            href="https://github.com/Brainicism/bgutil-ytdlp-pot-provider"
+            target="_blank"
+            rel="noreferrer"
+            className="text-brand-400 hover:text-brand-300 text-xs font-semibold"
+          >
+            bgutil-ytdlp-pot-provider
+          </a>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+            Paste PO Token
+          </label>
+          <textarea
+            placeholder="mweb.gvs+TOKEN or raw TOKEN"
+            value={poTokenText}
+            onChange={(e) => setPoTokenText(e.target.value)}
+            rows={4}
+            className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono text-xs resize-y"
+          />
+        </div>
+
+        <button
+          onClick={handleSavePoToken}
+          disabled={savingPoToken || !poTokenText.trim()}
+          className="btn-primary flex items-center gap-2 px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {savingPoToken ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          {savingPoToken ? 'Saving...' : 'Save PO Token'}
         </button>
       </div>
 

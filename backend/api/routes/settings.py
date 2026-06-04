@@ -12,10 +12,15 @@ import os
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 COOKIES_PATH = Path(os.environ.get("YT_DLP_COOKIES_FILE", "/app/data/cookies.txt"))
+PO_TOKEN_PATH = Path(os.environ.get("YT_DLP_PO_TOKEN_FILE", "/app/data/po_token.txt"))
 
 
 class CookiesPayload(BaseModel):
     cookies: str
+
+
+class PoTokenPayload(BaseModel):
+    po_token: str
 
 
 @router.get("/cookies")
@@ -47,6 +52,39 @@ def delete_cookies():
         if COOKIES_PATH.exists():
             COOKIES_PATH.unlink()
         return {"success": True, "deleted": True, "message": "Cookies deleted."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/potoken")
+def get_po_token_status():
+    exists = PO_TOKEN_PATH.exists() and PO_TOKEN_PATH.stat().st_size > 20
+    return {
+        "saved": exists,
+        "source": "user" if exists else None,
+        "size_bytes": PO_TOKEN_PATH.stat().st_size if exists else 0,
+    }
+
+
+@router.post("/potoken")
+def save_po_token(payload: PoTokenPayload):
+    po_token = (payload.po_token or "").strip()
+    if len(po_token) < 20:
+        raise HTTPException(status_code=400, detail="Invalid PO Token. Paste the full token value.")
+    try:
+        PO_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PO_TOKEN_PATH.write_text(po_token, encoding="utf-8")
+        return {"success": True, "saved": True, "message": "PO Token saved. YouTube downloads will use it automatically."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/potoken")
+def delete_po_token():
+    try:
+        if PO_TOKEN_PATH.exists():
+            PO_TOKEN_PATH.unlink()
+        return {"success": True, "deleted": True, "message": "PO Token deleted."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
