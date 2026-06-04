@@ -102,7 +102,6 @@ class Downloader:
             "nocheckcertificate": True,  # Bypass SSL certificate check drops
             "legacyserverconnect": True,
             "source_address": "0.0.0.0",
-            "impersonate": "chrome",
             "format": video_format,
             "extractor_args": {
                 "youtube": {
