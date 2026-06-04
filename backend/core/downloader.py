@@ -12,6 +12,11 @@ from typing import Optional, Callable
 import logging
 import ssl
 
+try:
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+except Exception:
+    ImpersonateTarget = None
+
 # Deep SSL patch: OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances
 try:
     import ssl as _ssl
@@ -111,6 +116,11 @@ class Downloader:
                 }
             }
         }
+        if ImpersonateTarget is not None:
+            try:
+                opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+            except Exception:
+                logger.warning("yt-dlp impersonation target unavailable; continuing without it.")
         
         # Do not attach cookies to primary android_vr opts. Stale cookies can
         # trigger bot checks; saved cookies are only used in explicit web fallback.
