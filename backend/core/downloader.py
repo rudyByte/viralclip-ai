@@ -116,12 +116,6 @@ class Downloader:
                 }
             }
         }
-        if ImpersonateTarget is not None:
-            try:
-                opts["impersonate"] = ImpersonateTarget.from_str("chrome")
-            except Exception:
-                logger.warning("yt-dlp impersonation target unavailable; continuing without it.")
-        
         # Do not attach cookies to primary android_vr opts. Stale cookies can
         # trigger bot checks; saved cookies are only used in explicit web fallback.
         if not os.environ.get("RUNNING_IN_DOCKER"):
@@ -142,14 +136,22 @@ class Downloader:
                     opts[k] = v
         return opts
 
+    def _add_impersonation(self, opts: dict) -> dict:
+        if ImpersonateTarget is not None:
+            try:
+                opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+            except Exception:
+                logger.warning("yt-dlp impersonation target unavailable; continuing without it.")
+        return opts
+
     def get_video_info(self, url: str) -> VideoInfo:
         """Fetch video metadata without downloading."""
         cookies_path = self.cookies_file_path or self.default_cookies_file_path
         attempts = [
-            {"client": "android_vr", "cookiefile": None},
-            {"client": "web", "cookiefile": cookies_path},
-            {"client": "ios", "cookiefile": None},
-            {"client": None, "cookiefile": None},
+            {"clients": ["android_vr", "web_embedded", "mweb", "ios"], "cookiefile": None, "impersonate": False},
+            {"clients": ["web", "web_embedded"], "cookiefile": cookies_path, "impersonate": True},
+            {"clients": ["tv", "tv_simply", "android"], "cookiefile": None, "impersonate": False},
+            {"clients": None, "cookiefile": None, "impersonate": True},
         ]
         last_error = None
         for attempt, attempt_cfg in enumerate(attempts, start=1):
@@ -157,14 +159,16 @@ class Downloader:
                 opts = self._get_ydl_opts({"skip_download": True, "format": "best"})
                 opts.pop("cookiesfrombrowser", None)
                 opts.pop("cookiefile", None)
-                if attempt_cfg["client"]:
-                    opts["extractor_args"] = {"youtube": {"player_client": [attempt_cfg["client"]]}}
+                if attempt_cfg["clients"]:
+                    opts["extractor_args"] = {"youtube": {"player_client": attempt_cfg["clients"]}}
                 else:
                     opts.pop("extractor_args", None)
                 if attempt_cfg["cookiefile"]:
                     opts["cookiefile"] = attempt_cfg["cookiefile"]
+                if attempt_cfg["impersonate"]:
+                    self._add_impersonation(opts)
                 logger.info(
-                    f"Metadata attempt {attempt}: client={attempt_cfg['client'] or 'default'} "
+                    f"Metadata attempt {attempt}: clients={attempt_cfg['clients'] or 'default'} "
                     f"cookies={'yes' if attempt_cfg['cookiefile'] else 'no'}"
                 )
                 with yt_dlp.YoutubeDL(opts) as ydl:
@@ -218,9 +222,10 @@ class Downloader:
         # This guarantees we always get *something* even if the first choice isn't available.
         cookies_path = self.cookies_file_path or self.default_cookies_file_path
         attempts = [
-            {"format": None, "client": "android_vr", "cookiefile": None},
-            {"format": "bestvideo+bestaudio/best", "client": "web", "cookiefile": cookies_path},
-            {"format": "best", "client": "ios", "cookiefile": None},
+            {"format": None, "clients": ["android_vr", "web_embedded", "mweb", "ios"], "cookiefile": None, "impersonate": False},
+            {"format": "bestvideo+bestaudio/best", "clients": ["web", "web_embedded"], "cookiefile": cookies_path, "impersonate": True},
+            {"format": "best", "clients": ["tv", "tv_simply", "android"], "cookiefile": None, "impersonate": False},
+            {"format": "best", "clients": None, "cookiefile": None, "impersonate": True},
         ]
 
         for attempt, attempt_cfg in enumerate(attempts, start=1):
@@ -228,13 +233,18 @@ class Downloader:
                 current_opts = ydl_opts.copy()
                 current_opts.pop("cookiesfrombrowser", None)
                 current_opts.pop("cookiefile", None)
-                current_opts["extractor_args"] = {"youtube": {"player_client": [attempt_cfg["client"]]}}
+                if attempt_cfg["clients"]:
+                    current_opts["extractor_args"] = {"youtube": {"player_client": attempt_cfg["clients"]}}
+                else:
+                    current_opts.pop("extractor_args", None)
                 if attempt_cfg["format"] is not None:
                     current_opts["format"] = attempt_cfg["format"]
                 if attempt_cfg["cookiefile"]:
                     current_opts["cookiefile"] = attempt_cfg["cookiefile"]
+                if attempt_cfg["impersonate"]:
+                    self._add_impersonation(current_opts)
                 logger.info(
-                    f"Download attempt {attempt}: client={attempt_cfg['client']} "
+                    f"Download attempt {attempt}: clients={attempt_cfg['clients'] or 'default'} "
                     f"cookies={'yes' if attempt_cfg['cookiefile'] else 'no'}"
                 )
 
