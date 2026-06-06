@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { AnimatePresence } from 'framer-motion'
+import { ClerkProvider } from '@clerk/clerk-react'
 import Sidebar from '@/components/Sidebar'
 import Dashboard from '@/pages/Dashboard'
 import CreateShort from '@/pages/CreateShort'
@@ -13,7 +14,7 @@ export default function App() {
     if (apiUrl) fetch(`${apiUrl}/health`).catch(() => {})
   }, [])
 
-  return (
+  const content = (
     <div className="flex min-h-screen bg-surface-900">
       {/* Mesh animated background */}
       <div className="mesh-bg" />
@@ -35,4 +36,7 @@ export default function App() {
       </main>
     </div>
   )
+  const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+  if (!clerkKey) return content
+  return <ClerkProvider publishableKey={clerkKey}>{content}</ClerkProvider>
 }

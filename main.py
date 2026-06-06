@@ -333,11 +333,22 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
 # ── Health Check ──────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
+    db_status = "unknown"
+    try:
+        from sqlalchemy import text
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+        db_status = "ok"
+    except Exception as exc:
+        db_status = f"error: {str(exc)[:120]}"
     return {
         "status": "ok",
         "app": "ViralClip AI",
         "version": "1.0.0",
         "groq_configured": bool(settings.groq_api_key),
+        "db": db_status,
+        "clerk": "ok" if settings.clerk_secret_key else "missing",
+        "cloudinary": "ok" if (settings.cloudinary_cloud_name and settings.cloudinary_api_key and settings.cloudinary_api_secret) else "missing",
         "whisper_model": settings.whisper_model,
     }
 

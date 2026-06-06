@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     # CORS
     frontend_url: str = Field("http://localhost:3000", env="FRONTEND_URL")
 
+    # Auth / storage / payments
+    clerk_secret_key: str = Field("", env="CLERK_SECRET_KEY")
+    clerk_jwt_secret: str = Field("", env="CLERK_JWT_SECRET")
+    cloudinary_cloud_name: str = Field("", env="CLOUDINARY_CLOUD_NAME")
+    cloudinary_api_key: str = Field("", env="CLOUDINARY_API_KEY")
+    cloudinary_api_secret: str = Field("", env="CLOUDINARY_API_SECRET")
+    razorpay_key_id: str = Field("", env="RAZORPAY_KEY_ID")
+    razorpay_key_secret: str = Field("", env="RAZORPAY_KEY_SECRET")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

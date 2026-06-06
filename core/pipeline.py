@@ -20,6 +20,8 @@ from core.analyzer import GroqAnalyzer, ViralMoment
 from core.clipper import Clipper
 from core.caption_generator import CaptionGenerator
 from core.background_mixer import BackgroundMixer
+from core.cloudinary_storage import CloudinaryStorage
+from core.youtube_transcript import extract_video_id, get_youtube_transcript_async
 from utils.face_tracker import FaceTracker
 from utils.virality_scorer import ViralityScorer
 
@@ -85,6 +87,64 @@ async def run_pipeline(
     try:
         # ── Load existing job record for checkpoint data ───────────────
         job = await _get_job(job_id)
+
+        cached_transcript = temp_dir / "transcript.json"
+        viral_moments_path = temp_dir / "viral_moments.json"
+        if not cached_transcript.exists() and not viral_moments_path.exists():
+            try:
+                await update_job_status(job_id, "transcribing", 10, "Fetching YouTube transcript...")
+                video_id = extract_video_id(youtube_url)
+                transcript = await get_youtube_transcript_async(video_id)
+                if transcript and transcript.segments:
+                    Transcriber.save_transcript(Transcriber(), transcript, str(cached_transcript))
+                    async with AsyncSessionLocal() as db:
+                        from sqlalchemy import update as sq_update
+                        await db.execute(
+                            sq_update(Job).where(Job.id == job_id).values(
+                                transcript_path=str(cached_transcript),
+                                transcript_source="youtube_api",
+                                youtube_video_id=video_id,
+                            )
+                        )
+                        await db.commit()
+
+                    await update_job_status(job_id, "analyzing", 35, "Detecting viral moments from transcript...")
+                    analyzer = GroqAnalyzer(
+                        api_key=settings.groq_api_key,
+                        detection_model=settings.groq_detection_model,
+                        hook_model=settings.groq_hook_model,
+                    )
+                    viral_moments = await analyzer.detect_viral_moments(
+                        transcript_chunks=transcript.get_chunks_for_analysis(chunk_duration=180.0),
+                        num_clips=num_clips,
+                        min_duration=clip_min_duration,
+                        max_duration=clip_max_duration,
+                    )
+                    if not viral_moments:
+                        await update_job_status(
+                            job_id,
+                            "error",
+                            0,
+                            "",
+                            "No viral moments were detected in the YouTube transcript.",
+                        )
+                        return
+                    with open(viral_moments_path, "w", encoding="utf-8") as f:
+                        json.dump([
+                            {
+                                "start_time": m.start_time,
+                                "end_time": m.end_time,
+                                "score": m.score,
+                                "reason": m.reason,
+                                "hook_words": m.hook_words,
+                                "scores": m.scores,
+                            }
+                            for m in viral_moments
+                        ], f, indent=2, ensure_ascii=False)
+                    await update_job_status(job_id, "downloading", 45, "Transcript analyzed. Downloading source video...")
+                    logger.info(f"[{job_id}] Transcript-first found {len(viral_moments)} moments.")
+            except Exception as transcript_exc:
+                logger.warning(f"[{job_id}] Transcript-first unavailable, using Whisper fallback: {transcript_exc}")
 
         # ── Step 1: Download ──────────────────────────────────────────
         video_path = job.video_path if job else None
@@ -154,21 +214,24 @@ async def run_pipeline(
             logger.info(f"[{job_id}] Step 1: Downloading {youtube_url}")
 
             downloader = Downloader(str(temp_dir), resolution=resolution, cookies=cookies)
-            info = await downloader.get_video_info_async(youtube_url)
-            yt_title = info.title
-            yt_channel = info.channel
+            try:
+                info = await downloader.get_video_info_async(youtube_url)
+                yt_title = info.title
+                yt_channel = info.channel
 
-            async with AsyncSessionLocal() as db:
-                from sqlalchemy import update as sq_update
-                await db.execute(
-                    sq_update(Job).where(Job.id == job_id).values(
-                        title=info.title,
-                        channel=info.channel,
-                        thumbnail_url=info.thumbnail,
-                        duration_seconds=info.duration,
+                async with AsyncSessionLocal() as db:
+                    from sqlalchemy import update as sq_update
+                    await db.execute(
+                        sq_update(Job).where(Job.id == job_id).values(
+                            title=info.title,
+                            channel=info.channel,
+                            thumbnail_url=info.thumbnail,
+                            duration_seconds=info.duration,
+                        )
                     )
-                )
-                await db.commit()
+                    await db.commit()
+            except Exception as info_exc:
+                logger.warning(f"[{job_id}] Video metadata fetch failed, continuing to download: {info_exc}")
 
             loop = asyncio.get_running_loop()
 
@@ -391,6 +454,13 @@ async def run_pipeline(
                 await bg_mixer.mix_with_background_async(
                     captioned_path, export_path, background_type, layout_template=layout_template
                 )
+                storage_type = "local"
+                file_size_bytes = os.path.getsize(export_path) if os.path.exists(export_path) else None
+                cloud_result = CloudinaryStorage().upload_video(export_path, f"{job_id}_clip_{i+1}")
+                if cloud_result and cloud_result.get("secure_url"):
+                    export_path = cloud_result["secure_url"]
+                    storage_type = "cloudinary"
+                    file_size_bytes = cloud_result.get("bytes") or file_size_bytes
 
                 # Generate hooks with quality model
                 clip_text = " ".join(w.word for w in words)
@@ -423,6 +493,8 @@ async def run_pipeline(
                         cropped_clip_path=cropped_path,
                         captioned_clip_path=captioned_path,
                         export_path=export_path,
+                        storage_type=storage_type,
+                        file_size_bytes=file_size_bytes,
                         caption_style=caption_style,
                         background_type=background_type,
                         layout_template=layout_template,

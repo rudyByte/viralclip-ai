@@ -10,7 +10,7 @@ import logging
 import json
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -57,7 +57,7 @@ def clip_to_dict(clip: Clip) -> dict:
             "hook_score": getattr(clip, "hook_score", None) or 0,
         },
         "status": clip.status,
-        "has_export": clip.export_path is not None and Path(clip.export_path or "").exists(),
+        "has_export": bool(clip.export_path and (str(clip.export_path).startswith("http") or Path(clip.export_path or "").exists())),
         "created_at": clip.created_at.isoformat() if clip.created_at else "",
     }
 
@@ -98,6 +98,8 @@ async def download_clip(clip_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Clip not found")
 
     export_path = clip.export_path
+    if export_path and str(export_path).startswith("http"):
+        return RedirectResponse(export_path)
     if not export_path or not Path(export_path).exists():
         raise HTTPException(status_code=404, detail="Export file not found")
 
@@ -209,6 +211,8 @@ async def preview_clip(clip_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Clip not found")
 
     export_path = clip.export_path
+    if export_path and str(export_path).startswith("http"):
+        return RedirectResponse(export_path)
     if not export_path or not Path(export_path).exists():
         raise HTTPException(status_code=404, detail="Export file not found")
 

@@ -9,7 +9,16 @@ import uuid
 import os
 
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./viralclip.db")
+def normalize_database_url(url: str) -> str:
+    """Make hosted Postgres URLs SQLAlchemy-async compatible."""
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return url
+
+
+DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./viralclip.db"))
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -24,6 +33,8 @@ class Job(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     youtube_url = Column(String, nullable=False)
+    user_id = Column(String, nullable=True)
+    youtube_video_id = Column(String, nullable=True)
     title = Column(String, nullable=True)
     channel = Column(String, nullable=True)
     thumbnail_url = Column(String, nullable=True)
@@ -45,8 +56,11 @@ class Job(Base):
     layout_template = Column(String, default="split_50_50")
     resolution = Column(String, default="1080p")
     cookies = Column(Text, nullable=True)
+    transcript_source = Column(String, nullable=True)
+    retry_count = Column(Integer, default=0)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 
 
@@ -55,6 +69,7 @@ class Clip(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id = Column(String, nullable=False)
+    user_id = Column(String, nullable=True)
     clip_index = Column(Integer, default=0)
 
     start_time = Column(Float, nullable=False)
@@ -79,6 +94,8 @@ class Clip(Base):
     cropped_clip_path = Column(String, nullable=True)
     captioned_clip_path = Column(String, nullable=True)
     export_path = Column(String, nullable=True)
+    storage_type = Column(String, default="local")
+    file_size_bytes = Column(Integer, nullable=True)
 
     # Settings
     caption_style = Column(String, default="hormozi")
@@ -117,6 +134,47 @@ class AppSettings(Base):
     key = Column(String, primary_key=True)
     value = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True)
+    email = Column(String, unique=True, nullable=False)
+    name = Column(String, nullable=True)
+    plan = Column(String, default="free")
+    clips_used_this_month = Column(Integer, default=0)
+    clips_limit = Column(Integer, default=2)
+    subscription_id = Column(String, nullable=True)
+    subscription_status = Column(String, nullable=True)
+    billing_cycle_start = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=True)
+    razorpay_order_id = Column(String, nullable=True)
+    razorpay_payment_id = Column(String, nullable=True)
+    razorpay_subscription_id = Column(String, nullable=True)
+    amount_inr = Column(Integer, nullable=True)
+    amount_usd = Column(Float, nullable=True)
+    plan = Column(String, nullable=True)
+    status = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UsageLog(Base):
+    __tablename__ = "usage_logs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=True)
+    action = Column(String, nullable=False)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 async def init_db():
@@ -167,6 +225,25 @@ async def init_db():
                 db_logger.error(f"Failed to add 'cookies' to 'jobs': {e}")
                 await session.rollback()
 
+        for column_name, column_sql in [
+            ("user_id", "ALTER TABLE jobs ADD COLUMN user_id VARCHAR"),
+            ("youtube_video_id", "ALTER TABLE jobs ADD COLUMN youtube_video_id VARCHAR"),
+            ("transcript_source", "ALTER TABLE jobs ADD COLUMN transcript_source VARCHAR"),
+            ("retry_count", "ALTER TABLE jobs ADD COLUMN retry_count INTEGER DEFAULT 0"),
+            ("updated_at", "ALTER TABLE jobs ADD COLUMN updated_at TIMESTAMP"),
+        ]:
+            try:
+                await session.execute(text(f"SELECT {column_name} FROM jobs LIMIT 1"))
+            except Exception:
+                await session.rollback()
+                try:
+                    await session.execute(text(column_sql))
+                    await session.commit()
+                    db_logger.info(f"Added column '{column_name}' to 'jobs' table.")
+                except Exception as e:
+                    db_logger.error(f"Failed to add '{column_name}' to 'jobs': {e}")
+                    await session.rollback()
+
         # Check clips table for layout_template
         try:
             await session.execute(text("SELECT layout_template FROM clips LIMIT 1"))
@@ -181,6 +258,9 @@ async def init_db():
                 await session.rollback()
 
         for column_name, column_sql in [
+            ("user_id", "ALTER TABLE clips ADD COLUMN user_id VARCHAR"),
+            ("storage_type", "ALTER TABLE clips ADD COLUMN storage_type VARCHAR DEFAULT 'local'"),
+            ("file_size_bytes", "ALTER TABLE clips ADD COLUMN file_size_bytes INTEGER"),
             ("youtube_title", "ALTER TABLE clips ADD COLUMN youtube_title TEXT"),
             ("youtube_description", "ALTER TABLE clips ADD COLUMN youtube_description TEXT"),
             ("instagram_caption", "ALTER TABLE clips ADD COLUMN instagram_caption TEXT"),
