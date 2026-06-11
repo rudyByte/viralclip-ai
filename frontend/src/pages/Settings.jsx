@@ -303,9 +303,19 @@ export default function Settings() {
           </label>
           <label className="space-y-1">
             <span className="text-xs font-semibold text-slate-400 uppercase">Clips</span>
-            <input type="number" min="1" max="10" value={defaults.numClips}
+            <input type="number" min="1" max="20" value={defaults.numClips}
               onChange={e => updateDefault('numClips', Number(e.target.value))}
               className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white" />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs font-semibold text-slate-400 uppercase">Default Layout</span>
+            <select value={defaults.layoutTemplate} onChange={e => updateDefault('layoutTemplate', e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white">
+              <option value="split_50_50">Split Screen (50/50)</option>
+              <option value="split_60_40">Split Screen (60/40)</option>
+              <option value="split_70_30">Split Screen (70/30)</option>
+              <option value="no_gameplay">Full Portrait 9:16</option>
+            </select>
           </label>
           <label className="space-y-1">
             <span className="text-xs font-semibold text-slate-400 uppercase">Resolution</span>

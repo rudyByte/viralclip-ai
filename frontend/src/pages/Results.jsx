@@ -63,6 +63,17 @@ const saveJobToHistory = (jobId, title) => {
   } catch (_) {}
 }
 
+const normalizeTag = (tag = '') => String(tag).trim().replace(/^#+/, '').replace(/\s+/g, '')
+const uniqueHashtags = (tags = []) => [...new Set(tags.map(normalizeTag).filter(Boolean))]
+const stripHashtags = (text = '') => String(text).replace(/(^|\s)#\S+/g, '').replace(/[ \t]+\n/g, '\n').trim()
+const cleanLines = (text = '') => String(text).replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+const cleanTitle = (text = '') => stripHashtags(text).replace(/\s{2,}/g, ' ').slice(0, 70)
+const formatCaptionWithTags = (caption = '', tags = []) => {
+  const cleanCaption = cleanLines(stripHashtags(caption))
+  const hashes = uniqueHashtags(tags).map(tag => `#${tag}`).join(' ')
+  return [cleanCaption, hashes].filter(Boolean).join('\n\n')
+}
+
 export default function Results() {
   const { jobId } = useParams()
   const navigate = useNavigate()
@@ -752,14 +763,14 @@ export default function Results() {
                           <p className="text-sm text-slate-300 pr-8 leading-relaxed whitespace-pre-line">{hooks.caption}</p>
                           {hooks.hashtags?.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-3 border-t border-white/[0.04] pt-3">
-                              {hooks.hashtags.map((tag, idx) => (
+                              {uniqueHashtags(hooks.hashtags).map((tag, idx) => (
                                 <span key={idx} className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
                                   #{tag}
                                 </span>
                               ))}
                             </div>
                           )}
-                          <button onClick={() => handleCopy(`${hooks.caption}\n\n${hooks.hashtags?.map(t => `#${t}`).join(' ')}`, 'caption')} className="absolute top-4 right-4 p-2 rounded-lg bg-surface-900 border border-white/5 opacity-0 group-hover/card:opacity-100 transition-opacity hover:text-white">
+                          <button onClick={() => handleCopy(formatCaptionWithTags(hooks.caption, hooks.hashtags || []), 'caption')} className="absolute top-4 right-4 p-2 rounded-lg bg-surface-900 border border-white/5 opacity-0 group-hover/card:opacity-100 transition-opacity hover:text-white">
                             {copiedText === 'caption' ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
                           </button>
                         </div>
@@ -797,9 +808,9 @@ export default function Results() {
 
                         {(() => {
                           const meta = hooks?.metadata || activeClip?.metadata || {}
-                          const ytTitle = meta.youtube_title || hooks?.title || ''
-                          const ytDesc = meta.youtube_description || ''
-                          const igCaption = meta.instagram_caption || hooks?.caption || ''
+                          const ytTitle = cleanTitle(meta.youtube_title || hooks?.title || '')
+                          const ytDesc = cleanLines(meta.youtube_description || '')
+                          const igCaption = cleanLines(meta.instagram_caption || formatCaptionWithTags(hooks?.caption || '', hooks?.hashtags || []))
 
                           if (contentTab === 'instagram') {
                             return (

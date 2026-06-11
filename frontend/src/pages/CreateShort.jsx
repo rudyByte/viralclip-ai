@@ -32,6 +32,9 @@ const LAYOUT_TEMPLATES = [
   { id: 'no_gameplay', name: 'Full Portrait 9:16', desc: 'Full screen crop of the main video, no gameplay background.', badge: 'Classic' },
 ]
 
+const MAX_BATCH_URLS = 20
+const MAX_CLIPS = 20
+
 export default function CreateShort() {
   const navigate = useNavigate()
   const defaults = loadDefaults()
@@ -79,7 +82,7 @@ export default function CreateShort() {
     setSubmitting(true)
     try {
       const response = await processVideo({
-        youtube_urls: urls.slice(0, 10),
+        youtube_urls: urls.slice(0, MAX_BATCH_URLS),
         clip_min_duration: parseInt(minDuration),
         clip_max_duration: parseInt(maxDuration),
         num_clips: parseInt(numClips),
@@ -149,7 +152,7 @@ export default function CreateShort() {
               1. Paste YouTube URL(s)
             </label>
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-              {urlCount} URL(s) detected - max 10
+              {urlCount} URL(s) detected - max {MAX_BATCH_URLS}
             </span>
           </div>
           <div className="relative">
@@ -214,7 +217,7 @@ export default function CreateShort() {
               <input
                 type="number"
                 min="1"
-                max="10"
+                max={MAX_CLIPS}
                 value={numClips}
                 onChange={(e) => setNumClips(e.target.value)}
                 disabled={submitting}

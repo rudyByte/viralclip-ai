@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     default_clip_min_duration: int = Field(30, env="DEFAULT_CLIP_MIN_DURATION")
     default_clip_max_duration: int = Field(60, env="DEFAULT_CLIP_MAX_DURATION")
     default_num_clips: int = Field(3, env="DEFAULT_NUM_CLIPS")
-    max_clips_per_job: int = Field(10, env="MAX_CLIPS_PER_JOB")
+    max_clips_per_job: int = Field(20, env="MAX_CLIPS_PER_JOB")
     default_caption_style: str = Field("hormozi", env="DEFAULT_CAPTION_STYLE")
     default_background: str = Field("subway", env="DEFAULT_BACKGROUND")
 
