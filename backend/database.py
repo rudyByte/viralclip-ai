@@ -7,14 +7,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from datetime import datetime
 import uuid
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 def normalize_database_url(url: str) -> str:
     """Make hosted Postgres URLs SQLAlchemy-async compatible."""
     if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql+asyncpg://"):
+        parts = urlsplit(url)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        if "sslmode" in query and "ssl" not in query:
+            sslmode = query.pop("sslmode")
+            query["ssl"] = "false" if sslmode == "disable" else "true"
+        elif "sslmode" in query:
+            query.pop("sslmode", None)
+        url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
     return url
 
 
