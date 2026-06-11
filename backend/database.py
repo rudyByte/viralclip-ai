@@ -21,7 +21,7 @@ def normalize_database_url(url: str) -> str:
         query = dict(parse_qsl(parts.query, keep_blank_values=True))
         if "sslmode" in query and "ssl" not in query:
             sslmode = query.pop("sslmode")
-            query["ssl"] = "false" if sslmode == "disable" else "true"
+            query["ssl"] = sslmode
         elif "sslmode" in query:
             query.pop("sslmode", None)
         url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
