@@ -87,11 +87,11 @@ async def process_video(
     raw_urls = req.youtube_urls if req.youtube_urls else []
     if req.youtube_url:
         raw_urls.extend(req.youtube_url.replace("\n", ",").split(","))
-    urls = [u.strip() for u in raw_urls if u and u.strip()][:20]
+    urls = [u.strip() for u in raw_urls if u and u.strip()][:100]
     if not urls:
         raise HTTPException(status_code=400, detail="No valid YouTube URLs provided")
-    if req.num_clips < 1 or req.num_clips > 20:
-        raise HTTPException(status_code=400, detail="num_clips must be between 1 and 20")
+    if req.num_clips < 1 or req.num_clips > 50:
+        raise HTTPException(status_code=400, detail="num_clips must be between 1 and 50")
 
     job_ids = []
     for url in urls:

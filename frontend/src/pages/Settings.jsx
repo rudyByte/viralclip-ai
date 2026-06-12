@@ -242,20 +242,25 @@ export default function Settings() {
         )}
 
         <div className="space-y-2 text-sm text-slate-400">
-          <p className="font-semibold text-white text-sm">How to get a PO Token:</p>
+          <p className="font-semibold text-white text-sm">How to get a PO Token (easiest method):</p>
           <ol className="list-decimal list-inside space-y-1 ml-1">
-            <li>Open youtube.com in your desktop browser.</li>
-            <li>Open DevTools Console.</li>
-            <li>Run: <code className="text-xs bg-surface-900 px-1 py-0.5 rounded text-slate-200">(await (await fetch('/youtubei/v1/visitor_id')).json())</code></li>
-            <li>Paste the token value below. Prefixes like <code className="text-xs bg-surface-900 px-1 py-0.5 rounded text-slate-200">mweb.gvs+</code> are accepted.</li>
+            <li>On your PC, install the <strong className="text-white">PO Token Provider</strong> plugin:
+              <code className="text-xs bg-surface-900 px-1 py-0.5 rounded text-slate-200 block mt-1">pip install bgutil-ytdlp-pot-provider</code>
+            </li>
+            <li>Run yt-dlp locally once:
+              <code className="text-xs bg-surface-900 px-1 py-0.5 rounded text-slate-200 block mt-1">yt-dlp --print po_token https://www.youtube.com/watch?v=test</code>
+            </li>
+            <li>It will print a token like <code className="text-xs bg-surface-900 px-1 py-0.5 rounded text-slate-200">mweb.gvs+TOKEN_VALUE_HERE</code></li>
+            <li><strong className="text-white">Paste the FULL line</strong> (including the <code className="text-xs bg-surface-900 px-1 py-0.5 rounded text-slate-200">mweb.gvs+</code> prefix) below and save.</li>
           </ol>
+          <p className="text-xs text-slate-500 pt-1">The PO Token is valid for ~24 hours. Re-generate it weekly.</p>
           <a
             href="https://github.com/Brainicism/bgutil-ytdlp-pot-provider"
             target="_blank"
             rel="noreferrer"
-            className="text-brand-400 hover:text-brand-300 text-xs font-semibold"
+            className="text-brand-400 hover:text-brand-300 text-xs font-semibold block"
           >
-            bgutil-ytdlp-pot-provider
+            bgutil-ytdlp-pot-provider (GitHub)
           </a>
         </div>
 
@@ -303,7 +308,7 @@ export default function Settings() {
           </label>
           <label className="space-y-1">
             <span className="text-xs font-semibold text-slate-400 uppercase">Clips</span>
-            <input type="number" min="1" max="20" value={defaults.numClips}
+            <input type="number" min="1" max="50" value={defaults.numClips}
               onChange={e => updateDefault('numClips', Number(e.target.value))}
               className="w-full px-3 py-2 rounded-xl bg-surface-900 border border-white/10 text-white" />
           </label>

@@ -137,9 +137,10 @@ class Downloader:
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 60,
-            "retries": 15,
-            "fragment_retries": 15,
-            "file_access_retries": 5,
+            "retries": 10,
+            "fragment_retries": 10,
+            "extractor_retries": 3,       # Limit extraction retries — don't hang forever
+            "file_access_retries": 3,
             "nocheckcertificate": True,
             "legacyserverconnect": True,
             "source_address": "0.0.0.0",
@@ -278,7 +279,6 @@ class Downloader:
         base_opts = {
             "outtmpl": video_path,
             "merge_output_format": "mp4",
-            "noprogress": True,
             "progress_hooks": [progress_hook],
             "continuedl": True,          # Resume partial downloads
             "http_chunk_size": 10485760,  # 10MB chunks — fewer TCP hangs
@@ -369,13 +369,24 @@ class Downloader:
         url: str,
         job_id: str,
         progress_callback: Optional[Callable] = None,
+        timeout: int = 1200,  # 20-minute hard timeout
     ) -> tuple[str, str]:
-        """Async wrapper for download_video."""
+        """Async wrapper for download_video with a hard timeout to prevent infinite hangs."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.download_video(url, job_id, progress_callback)
-        )
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: self.download_video(url, job_id, progress_callback)
+                ),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"Video download timed out after {timeout // 60} minutes. "
+                f"YouTube may be rate-limiting or blocking the server IP. "
+                f"Try saving a valid PO Token in Settings > YouTube PO Token."
+            )
 
     async def get_video_info_async(self, url: str) -> VideoInfo:
         """Async wrapper for get_video_info."""

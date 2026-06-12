@@ -32,8 +32,8 @@ const LAYOUT_TEMPLATES = [
   { id: 'no_gameplay', name: 'Full Portrait 9:16', desc: 'Full screen crop of the main video, no gameplay background.', badge: 'Classic' },
 ]
 
-const MAX_BATCH_URLS = 20
-const MAX_CLIPS = 20
+const MAX_BATCH_URLS = 100
+const MAX_CLIPS = 50
 
 export default function CreateShort() {
   const navigate = useNavigate()
