@@ -52,29 +52,54 @@ class Downloader:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.resolution = resolution
-        default_cookies = os.environ.get("YT_DLP_COOKIES_FILE", "/app/data/cookies.txt")
-        self.default_cookies_file_path = (
-            default_cookies
-            if os.path.exists(default_cookies) and os.path.getsize(default_cookies) > 100
-            else None
-        )
-        po_token_file = os.environ.get("YT_DLP_PO_TOKEN_FILE", "/app/data/po_token.txt")
+
+        # Resolve cookies file path — try persistent /data/ first (HF Spaces), then fall back
+        # HF Spaces: /data/ is persistent across restarts but /app/data/ is ephemeral
+        self.default_cookies_file_path = None
+        for candidate in [
+            os.environ.get("YT_DLP_COOKIES_FILE", ""),
+            "/data/cookies.txt",          # HF Spaces persistent volume
+            "/app/data/cookies.txt",       # HF Space container (fallback)
+            "cookies.txt",                  # local working dir
+        ]:
+            if candidate and Path(candidate).exists() and Path(candidate).stat().st_size > 100:
+                self.default_cookies_file_path = candidate
+                cookie_size = Path(candidate).stat().st_size
+                logger.info(f"[COOKIES] Loaded cookies from {candidate} ({cookie_size} bytes)")
+                break
+
+        if self.default_cookies_file_path:
+            logger.info(f"[COOKIES] yt-dlp will use saved cookies file: {self.default_cookies_file_path}")
+        else:
+            logger.warning("[COOKIES] No cookies file found on any known path. YouTube downloads from cloud servers may be blocked.")
+
+        # PO Token (Proof of Origin) — helps bypass datacenter IP blocks
         self.po_token = None
-        if os.path.exists(po_token_file) and os.path.getsize(po_token_file) > 20:
-            try:
-                self.po_token = Path(po_token_file).read_text(encoding="utf-8").strip()
-                logger.info("Loaded saved YouTube PO Token.")
-            except Exception as e:
-                logger.warning(f"Failed to load PO Token file: {e}")
+        for po_candidate in [
+            os.environ.get("YT_DLP_PO_TOKEN_FILE", ""),
+            "/data/po_token.txt",
+            "/app/data/po_token.txt",
+            "po_token.txt",
+        ]:
+            if po_candidate and Path(po_candidate).exists() and Path(po_candidate).stat().st_size > 20:
+                try:
+                    self.po_token = Path(po_candidate).read_text(encoding="utf-8").strip()
+                    logger.info(f"[PO TOKEN] Loaded from {po_candidate}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to load PO Token file {po_candidate}: {e}")
+
+        if not self.po_token:
+            logger.info("[PO TOKEN] Not available — will try android_vr/ios no-cookie fallbacks.")
         
-        # Save custom cookies to a file in the job temporary directory if provided
+        # Save custom cookies from request body to a per-job file
         self.cookies_file_path = None
         if cookies and cookies.strip():
             c_file = self.output_dir / "job_cookies.txt"
             try:
                 c_file.write_text(cookies.strip(), encoding="utf-8")
                 self.cookies_file_path = str(c_file)
-                logger.info(f"Saved custom cookies to {self.cookies_file_path}")
+                logger.info(f"[COOKIES] Saved per-job cookies to {self.cookies_file_path}")
             except Exception as e:
                 logger.error(f"Failed to write custom cookies file: {e}")
 
@@ -84,6 +109,7 @@ class Downloader:
         Base opts are deliberately minimal — individual attempts configure
         their own player_client / extractor_args via _apply_youtube_args.
         """
+        # Determine format based on chosen resolution.
         res_limit = "1080"
         if self.resolution == "best":
             video_format = (
@@ -172,7 +198,10 @@ class Downloader:
         use_po_token: bool = False,
     ) -> None:
         if clients:
-            youtube_args = {"player_client": clients}
+            # Merge with existing extractor_args — PRESERVE skip=webpage and any other settings
+            existing = opts.get("extractor_args", {}).get("youtube", {})
+            skip = existing.get("skip", ["webpage"])
+            youtube_args = {"player_client": clients, "skip": skip}
             po_tokens = self._po_tokens(clients) if use_po_token else []
             if po_tokens:
                 youtube_args["po_token"] = po_tokens
@@ -245,15 +274,16 @@ class Downloader:
                 pct = int((downloaded / total) * 100) if total else 0
                 progress_callback(pct)
 
+        # Base download options (format key removed to avoid overriding format determined in _get_ydl_opts)
         base_opts = {
             "outtmpl": video_path,
             "merge_output_format": "mp4",
             "noprogress": True,
             "progress_hooks": [progress_hook],
-            "continuedl": True,
-            "http_chunk_size": 10485760,
-            "sleep_interval_requests": 2,
-            "throttledratelimit": 100000,
+            "continuedl": True,          # Resume partial downloads
+            "http_chunk_size": 10485760,  # 10MB chunks — fewer TCP hangs
+            "sleep_interval_requests": 2, # Pause between retries
+            "throttledratelimit": 100000, # 100KB/s min — triggers retry if throttled below
             "postprocessors": [{
                 "key": "FFmpegVideoConvertor",
                 "preferedformat": "mp4",
@@ -325,8 +355,8 @@ class Downloader:
         import subprocess
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
-            "-ar", "16000",
-            "-ac", "1",
+            "-ar", "16000",       # 16kHz sample rate for Whisper
+            "-ac", "1",           # Mono
             "-f", "wav",
             audio_path
         ]
@@ -340,6 +370,7 @@ class Downloader:
         job_id: str,
         progress_callback: Optional[Callable] = None,
     ) -> tuple[str, str]:
+        """Async wrapper for download_video."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
@@ -347,5 +378,6 @@ class Downloader:
         )
 
     async def get_video_info_async(self, url: str) -> VideoInfo:
+        """Async wrapper for get_video_info."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.get_video_info(url))

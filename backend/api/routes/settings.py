@@ -11,8 +11,25 @@ import os
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-COOKIES_PATH = Path(os.environ.get("YT_DLP_COOKIES_FILE", "/app/data/cookies.txt"))
-PO_TOKEN_PATH = Path(os.environ.get("YT_DLP_PO_TOKEN_FILE", "/app/data/po_token.txt"))
+# Resolve persistent storage paths:
+#   HF Spaces: /data/ is persistent across restarts (but /app/data/ is ephemeral)
+#   Docker:    /app/data/ or ./data/ are used
+#   Local:     ./data/ or ./cookies.txt in working dir
+_HF_PERSISTENT = "/data/cookies.txt"
+_HF_EPHEMERAL = "/app/data/cookies.txt"
+_YT_DLP_ENV_VAR = os.environ.get("YT_DLP_COOKIES_FILE", "")
+
+# Choose path: prefer env var > HF persistent > HF ephemeral
+COOKIES_PATH = Path(
+    _YT_DLP_ENV_VAR if _YT_DLP_ENV_VAR else
+    (_HF_PERSISTENT if os.path.isdir("/data") else _HF_EPHEMERAL)
+)
+
+_PO_ENV_VAR = os.environ.get("YT_DLP_PO_TOKEN_FILE", "")
+PO_TOKEN_PATH = Path(
+    _PO_ENV_VAR if _PO_ENV_VAR else
+    ("/data/po_token.txt" if os.path.isdir("/data") else "/app/data/po_token.txt")
+)
 
 
 class CookiesPayload(BaseModel):

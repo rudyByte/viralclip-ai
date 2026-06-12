@@ -207,6 +207,48 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info(f"Database initialized")
     await reset_stale_jobs()
+    
+    # ── Persistent storage migration ────────────────────────────────────
+    # HF Spaces: /data/ persists across restarts, /app/data/ is ephemeral.
+    # Migrate any saved cookies/PO-tokens to the persistent volume.
+    try:
+        _DATA_DIR = Path("/data")
+        if _DATA_DIR.is_dir():
+            # Migrate cookies.txt
+            src_cookies = Path("/app/data/cookies.txt")
+            if src_cookies.exists() and src_cookies.stat().st_size > 100:
+                dst = _DATA_DIR / "cookies.txt"
+                if not dst.exists() or dst.stat().st_size < src_cookies.stat().st_size:
+                    import shutil
+                    shutil.copy2(str(src_cookies), str(dst))
+                    logger.info(f"[PERSISTENT] Migrated cookies.txt to /data/ ({dst.stat().st_size} bytes)")
+            # Also check if /data/ has cookies that /app/data/ doesn't
+            dst = _DATA_DIR / "cookies.txt"
+            if dst.exists() and dst.stat().st_size > 100:
+                src_cookies.parent.mkdir(parents=True, exist_ok=True)
+                if not src_cookies.exists() or src_cookies.stat().st_size < dst.stat().st_size:
+                    import shutil
+                    shutil.copy2(str(dst), str(src_cookies))
+                    logger.info(f"[PERSISTENT] Restored cookies.txt from /data/ ({dst.stat().st_size} bytes)")
+            # Migrate PO Token
+            src_po = Path("/app/data/po_token.txt")
+            if src_po.exists() and src_po.stat().st_size > 20:
+                dst_po = _DATA_DIR / "po_token.txt"
+                if not dst_po.exists() or dst_po.stat().st_size < src_po.stat().st_size:
+                    import shutil
+                    shutil.copy2(str(src_po), str(dst_po))
+                    logger.info(f"[PERSISTENT] Migrated po_token.txt to /data/")
+            dst_po = _DATA_DIR / "po_token.txt"
+            if dst_po.exists() and dst_po.stat().st_size > 20:
+                src_po.parent.mkdir(parents=True, exist_ok=True)
+                if not src_po.exists():
+                    import shutil
+                    shutil.copy2(str(dst_po), str(src_po))
+                    logger.info(f"[PERSISTENT] Restored po_token.txt from /data/")
+            logger.info("[PERSISTENT] Volume sync complete")
+    except Exception as persist_err:
+        logger.warning(f"[PERSISTENT] Storage migration issue (non-fatal): {persist_err}")
+    
     logger.info(f"Temp dir: {settings.temp_dir}")
     logger.info(f"Export dir: {settings.export_dir}")
     logger.info(f"Groq detection model: {settings.groq_detection_model}")

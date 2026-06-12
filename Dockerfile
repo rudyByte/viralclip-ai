@@ -41,13 +41,25 @@ RUN pip install --no-cache-dir --upgrade -r requirements.txt yt-dlp 2>&1 | tail 
 # Copy application source code
 COPY --chown=user:user . /app/
 
-# Seed server cookies for HF fallback — the repo ships valid YouTube cookies
-RUN if [ -f /app/cookies.txt ]; then \
+# Seed server cookies for HF fallback — the repo ships valid YouTube cookies in backend/
+# NOTE: cookies.txt is at /app/backend/cookies.txt (not /app/cookies.txt) because
+# the entire repo is COPYed to /app/ and the file lives under the backend/ directory.
+RUN if [ -f /app/backend/cookies.txt ]; then \
+      cp /app/backend/cookies.txt /app/data/cookies.txt && \
+      chown user:user /app/data/cookies.txt && \
+      echo "Cookies seeded from backend/cookies.txt to /app/data/cookies.txt" ; \
+    elif [ -f /app/cookies.txt ]; then \
       cp /app/cookies.txt /app/data/cookies.txt && \
       chown user:user /app/data/cookies.txt && \
-      echo "Cookies seeded to /app/data/cookies.txt" ; \
+      echo "Cookies seeded from /app/cookies.txt to /app/data/cookies.txt" ; \
     else \
-      echo "WARNING: No cookies.txt found at repo root — HF Space may struggle with YouTube downloads" ; \
+      echo "WARNING: No cookies.txt found — HF Space may struggle with YouTube downloads" ; \
+    fi ; \
+    # Also copy to /data/ (HF persistent volume) so cookies survive restarts
+    if [ -f /app/data/cookies.txt ] && [ -d /data ]; then \
+      cp /app/data/cookies.txt /data/cookies.txt && \
+      chown user:user /data/cookies.txt && \
+      echo "Also seeded to /data/cookies.txt (HF persistent volume)" ; \
     fi
 
 # Switch to the non-root user
