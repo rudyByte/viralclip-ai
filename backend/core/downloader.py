@@ -388,7 +388,13 @@ class Downloader:
                 f"Try saving a valid PO Token in Settings > YouTube PO Token."
             )
 
-    async def get_video_info_async(self, url: str) -> VideoInfo:
-        """Async wrapper for get_video_info."""
+    async def get_video_info_async(self, url: str, timeout: int = 180) -> VideoInfo:
+        """Async wrapper for get_video_info with a 3-minute timeout."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: self.get_video_info(url))
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self.get_video_info(url)),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"Video metadata fetch timed out after {timeout}s. YouTube may be blocking the server.")
