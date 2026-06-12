@@ -241,9 +241,26 @@ async def run_pipeline(
                     loop,
                 )
 
-            video_path, audio_path = await downloader.download_video_async(
-                youtube_url, job_id, progress_callback=dl_progress
-            )
+            try:
+                video_path, audio_path = await downloader.download_video_async(
+                    youtube_url, job_id, progress_callback=dl_progress
+                )
+            except Exception as dl_exc:
+                dl_err = str(dl_exc)
+                logger.error(f"[{job_id}] Download failed: {dl_err}")
+                mom_path = temp_dir / "viral_moments.json"
+                have_analysis = mom_path.exists()
+                if have_analysis:
+                    msg = (
+                        "YouTube blocked the video download from this server. "
+                        "The AI transcript analysis was completed! "
+                        "Go to Settings > YouTube Cookies on a PC, export your cookies from Chrome, "
+                        "save them. Then re-submit. Transcript is cached. "
+                        f"Error: {dl_err[:200]}"
+                    )
+                    await update_job_status(job_id, "error", 0, "", msg)
+                    return
+                raise
 
             async with AsyncSessionLocal() as db:
                 from sqlalchemy import update as sq_update

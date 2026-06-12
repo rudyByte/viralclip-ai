@@ -36,13 +36,19 @@ RUN mkdir -p /app/data /app/temp /app/exports /app/assets /app/models \
 
 # Copy requirements
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade -r requirements.txt yt-dlp 2>&1 | tail -5
 
 # Copy application source code
 COPY --chown=user:user . /app/
 
-# Seed server cookies for HF fallback if a cookies.txt file is present.
-RUN if [ -f /app/cookies.txt ]; then cp /app/cookies.txt /app/data/cookies.txt && chown user:user /app/data/cookies.txt; fi
+# Seed server cookies for HF fallback — the repo ships valid YouTube cookies
+RUN if [ -f /app/cookies.txt ]; then \
+      cp /app/cookies.txt /app/data/cookies.txt && \
+      chown user:user /app/data/cookies.txt && \
+      echo "Cookies seeded to /app/data/cookies.txt" ; \
+    else \
+      echo "WARNING: No cookies.txt found at repo root — HF Space may struggle with YouTube downloads" ; \
+    fi
 
 # Switch to the non-root user
 USER user

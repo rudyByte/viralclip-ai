@@ -79,9 +79,11 @@ class Downloader:
                 logger.error(f"Failed to write custom cookies file: {e}")
 
     def _get_ydl_opts(self, extra_opts: Optional[dict] = None) -> dict:
-        """Construct standard ydl_opts with cookie and client spoofing workarounds."""
-        # Determine format based on chosen resolution.
-        # Uses a deep fallback chain so ANY available format is accepted.
+        """Construct standard ydl_opts with cookie and client spoofing workarounds.
+        
+        Base opts are deliberately minimal — individual attempts configure
+        their own player_client / extractor_args via _apply_youtube_args.
+        """
         res_limit = "1080"
         if self.resolution == "best":
             video_format = (
@@ -112,29 +114,25 @@ class Downloader:
             "retries": 15,
             "fragment_retries": 15,
             "file_access_retries": 5,
-            "nocheckcertificate": True,  # Bypass SSL certificate check drops
+            "nocheckcertificate": True,
             "legacyserverconnect": True,
             "source_address": "0.0.0.0",
             "format": video_format,
             "extractor_args": {
                 "youtube": {
-                    # android_vr uses a different API endpoint that works on datacenter IPs
-                    # without needing cookies or JS signature deciphering
+                    "skip": ["webpage"],  # Skip webpage — hit innerTube API directly
                     "player_client": ["android_vr"]
                 }
             }
         }
-        # Do not attach cookies to primary android_vr opts. Stale cookies can
-        # trigger bot checks; saved cookies are only used in explicit web fallback.
+        # Local dev: try browser cookies
         if not os.environ.get("RUNNING_IN_DOCKER"):
-            # Try using cookies from browser when running locally (not in Docker)
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
 
         if extra_opts:
             for k, v in extra_opts.items():
                 if k == "extractor_args" and "extractor_args" in opts:
-                    # Merge extractor_args
                     for ext, args in v.items():
                         if ext in opts["extractor_args"]:
                             opts["extractor_args"][ext].update(args)
@@ -183,14 +181,24 @@ class Downloader:
             opts.pop("extractor_args", None)
 
     def get_video_info(self, url: str) -> VideoInfo:
-        """Fetch video metadata without downloading."""
+        """Fetch video metadata without downloading. Uses deep fallback chain."""
         cookies_path = self.cookies_file_path or self.default_cookies_file_path
+        # Try 10 different client/extractor strategies in order
         attempts = [
-            {"clients": ["android_vr"], "cookiefile": None, "po": False, "impersonate": False},
+            # 1-3: Try with cookies on web/mweb/android clients (cookies bypass most IP blocks)
+            {"clients": ["web"], "cookiefile": cookies_path, "po": False, "impersonate": True},
             {"clients": ["mweb"], "cookiefile": cookies_path, "po": True, "impersonate": True},
             {"clients": ["android"], "cookiefile": cookies_path, "po": False, "impersonate": False},
+            # 4-6: Try no-cookie approaches with various API clients
+            {"clients": ["android_vr", "android_creator"], "cookiefile": None, "po": False, "impersonate": False},
+            {"clients": ["ios"], "cookiefile": None, "po": False, "impersonate": False},
+            {"clients": ["web_safari"], "cookiefile": None, "po": False, "impersonate": True},
+            # 7-8: Try TV/embedded clients
             {"clients": ["tv_embedded"], "cookiefile": None, "po": False, "impersonate": False},
-            {"clients": None, "cookiefile": None, "po": False, "impersonate": True},
+            {"clients": ["tv"], "cookiefile": None, "po": False, "impersonate": False},
+            # 9-10: Default yt-dlp behavior (no custom extractor_args)
+            {"clients": None, "cookiefile": cookies_path, "po": False, "impersonate": True},
+            {"clients": None, "cookiefile": None, "po": False, "impersonate": False},
         ]
         last_error = None
         for attempt, attempt_cfg in enumerate(attempts, start=1):
@@ -237,16 +245,15 @@ class Downloader:
                 pct = int((downloaded / total) * 100) if total else 0
                 progress_callback(pct)
 
-        # Base download options (format key removed to avoid overriding format determined in _get_ydl_opts)
         base_opts = {
             "outtmpl": video_path,
             "merge_output_format": "mp4",
             "noprogress": True,
             "progress_hooks": [progress_hook],
-            "continuedl": True,          # Resume partial downloads
-            "http_chunk_size": 10485760,  # 10MB chunks — fewer TCP hangs
-            "sleep_interval_requests": 2, # Pause between retries
-            "throttledratelimit": 100000, # 100KB/s min — triggers retry if throttled below
+            "continuedl": True,
+            "http_chunk_size": 10485760,
+            "sleep_interval_requests": 2,
+            "throttledratelimit": 100000,
             "postprocessors": [{
                 "key": "FFmpegVideoConvertor",
                 "preferedformat": "mp4",
@@ -255,15 +262,24 @@ class Downloader:
         
         ydl_opts = self._get_ydl_opts(base_opts)
 
-        # Escalating format fallbacks – each attempt is broader than the previous.
-        # This guarantees we always get *something* even if the first choice isn't available.
+        # Escalating fallback chain — tries cookies-first (often bypasses IP blocks),
+        # then multiple API client types, then raw extraction.
         cookies_path = self.cookies_file_path or self.default_cookies_file_path
         attempts = [
+            # Cookies-based approaches (most likely to work on datacenter IPs)
+            {"format": None, "clients": ["web"], "cookiefile": cookies_path, "po": False, "impersonate": True},
+            {"format": None, "clients": ["mweb"], "cookiefile": cookies_path, "po": True, "impersonate": True},
+            {"format": None, "clients": ["android"], "cookiefile": cookies_path, "po": False, "impersonate": False},
+            # No-cookie API client approaches
             {"format": None, "clients": ["android_vr"], "cookiefile": None, "po": False, "impersonate": False},
-            {"format": "bestvideo+bestaudio/best", "clients": ["mweb"], "cookiefile": cookies_path, "po": True, "impersonate": True},
-            {"format": "bestvideo+bestaudio/best", "clients": ["android"], "cookiefile": cookies_path, "po": False, "impersonate": False},
+            {"format": None, "clients": ["ios"], "cookiefile": None, "po": False, "impersonate": False},
+            {"format": None, "clients": ["web_safari"], "cookiefile": None, "po": False, "impersonate": True},
+            # TV clients
             {"format": "best", "clients": ["tv_embedded"], "cookiefile": None, "po": False, "impersonate": False},
-            {"format": "best", "clients": None, "cookiefile": None, "po": False, "impersonate": True},
+            {"format": "best", "clients": ["tv"], "cookiefile": None, "po": False, "impersonate": False},
+            # Default yt-dlp (no custom extractor_args)
+            {"format": "best", "clients": None, "cookiefile": cookies_path, "po": False, "impersonate": True},
+            {"format": "best", "clients": None, "cookiefile": None, "po": False, "impersonate": False},
         ]
 
         for attempt, attempt_cfg in enumerate(attempts, start=1):
@@ -309,8 +325,8 @@ class Downloader:
         import subprocess
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
-            "-ar", "16000",       # 16kHz sample rate for Whisper
-            "-ac", "1",           # Mono
+            "-ar", "16000",
+            "-ac", "1",
             "-f", "wav",
             audio_path
         ]
@@ -324,7 +340,6 @@ class Downloader:
         job_id: str,
         progress_callback: Optional[Callable] = None,
     ) -> tuple[str, str]:
-        """Async wrapper for download_video."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
@@ -332,6 +347,5 @@ class Downloader:
         )
 
     async def get_video_info_async(self, url: str) -> VideoInfo:
-        """Async wrapper for get_video_info."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.get_video_info(url))
