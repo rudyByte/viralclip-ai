@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "allow"  # Allow env vars like DATABASE_URL, YT_DLP_COOKIES_FILE used directly via os.getenv
 
     def ensure_dirs(self):
         """Create required directories if they don't exist."""

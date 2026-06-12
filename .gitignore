@@ -55,6 +55,12 @@ env/
 sqlite.db
 viralclip.db
 
+# Logs
+*.log
+
+# Docs (personal guides)
+docs/*.md
+
 # IDE settings
 .vscode/
 .idea/

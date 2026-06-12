@@ -398,7 +398,7 @@ Generate metadata. Respond ONLY with valid JSON, no markdown:
             )
             data = json.loads(self._clean_json_response(raw))
             youtube_title = str(data.get("youtube_title") or video_title or "Viral Clip")
-            youtube_title = re.sub(r"\s+#\S+", "", youtube_title).strip()[:70]
+            youtube_title = re.sub(r"\s*#\S+", "", youtube_title).strip()[:70]  # remove ALL hashtags including at start
             return {
                 "youtube_title": youtube_title,
                 "youtube_description": str(data.get("youtube_description") or ""),
@@ -408,7 +408,7 @@ Generate metadata. Respond ONLY with valid JSON, no markdown:
         except Exception as e:
             logger.error(f"Clip metadata generation failed: {e} | Raw: {raw[:200]}")
             safe_title = re.sub(
-                r"\s+#\S+",
+                r"\s*#\S+",
                 "",
                 moment.hook_words or moment.reason or video_title or "Viral Clip",
             ).strip()[:70]

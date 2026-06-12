@@ -65,13 +65,30 @@ const saveJobToHistory = (jobId, title) => {
 
 const normalizeTag = (tag = '') => String(tag).trim().replace(/^#+/, '').replace(/\s+/g, '')
 const uniqueHashtags = (tags = []) => [...new Set(tags.map(normalizeTag).filter(Boolean))]
-const stripHashtags = (text = '') => String(text).replace(/(^|\s)#\S+/g, '').replace(/[ \t]+\n/g, '\n').trim()
+
+// Strip hashtags from text without leaving extra spaces/newlines
+const stripHashtags = (text = '') => {
+  let cleaned = String(text)
+    .replace(/#\S+/g, '')           // remove #hashtag words
+    .replace(/[ \t]+\n/g, '\n')     // spaces before newlines
+    .replace(/\n[ \t]+/g, '\n')     // spaces after newlines
+    .replace(/[ \t]{2,}/g, ' ')     // multiple spaces to single
+    .replace(/\n{3,}/g, '\n\n')      // max 2 newlines in a row
+    .trim()
+  return cleaned
+}
 const cleanLines = (text = '') => String(text).replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
-const cleanTitle = (text = '') => stripHashtags(text).replace(/\s{2,}/g, ' ').slice(0, 70)
+const cleanTitle = (text = '') => {
+  const cleaned = String(text).replace(/#\S+/g, '').replace(/\s{2,}/g, ' ').trim()
+  return cleaned.slice(0, 70)
+}
 const formatCaptionWithTags = (caption = '', tags = []) => {
   const cleanCaption = cleanLines(stripHashtags(caption))
   const hashes = uniqueHashtags(tags).map(tag => `#${tag}`).join(' ')
-  return [cleanCaption, hashes].filter(Boolean).join('\n\n')
+  if (!cleanCaption && !hashes) return ''
+  if (!cleanCaption) return hashes
+  if (!hashes) return cleanCaption
+  return cleanCaption + '\n\n' + hashes
 }
 
 export default function Results() {
@@ -744,8 +761,8 @@ export default function Results() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="glass rounded-2xl p-4 space-y-2 relative group/card">
                           <h4 className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">Suggested Title</h4>
-                          <p className="text-sm font-semibold text-white pr-8 leading-snug">{hooks.title}</p>
-                          <button onClick={() => handleCopy(hooks.title, 'title')} className="absolute top-4 right-4 p-2 rounded-lg bg-surface-900 border border-white/5 opacity-0 group-hover/card:opacity-100 transition-opacity hover:text-white">
+                          <p className="text-sm font-semibold text-white pr-8 leading-snug">{cleanTitle(hooks.title)}</p>
+                          <button onClick={() => handleCopy(cleanTitle(hooks.title), 'title')} className="absolute top-4 right-4 p-2 rounded-lg bg-surface-900 border border-white/5 opacity-0 group-hover/card:opacity-100 transition-opacity hover:text-white">
                             {copiedText === 'title' ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
                           </button>
                         </div>
