@@ -12,26 +12,49 @@ from typing import Optional, Callable
 import logging
 import ssl
 
+# ── Force certifi CA bundle ──────────────────────────────────────────────
+# HF Spaces often have outdated system CA bundles. Use certifi's instead.
+try:
+    import certifi
+    _ca_bundle = certifi.where()
+    os.environ["SSL_CERT_FILE"] = _ca_bundle
+    os.environ["REQUESTS_CA_BUNDLE"] = _ca_bundle
+    logging.getLogger(__name__).info(f"[SSL] Using certifi CA bundle: {_ca_bundle}")
+except ImportError:
+    logging.getLogger(__name__).warning("[SSL] certifi not installed — using system CA bundle")
+
+# ── Deep SSL patches ─────────────────────────────────────────────────────
+# 1. OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances (fixes EOF on Python 3.11+)
+import ssl as _ssl
+
+_op_ignore = getattr(_ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
+_orig_SSLContext_init = _ssl.SSLContext.__init__
+
+def _patched_SSLContext_init(self, *args, **kwargs):
+    if _orig_SSLContext_init is not object.__init__:
+        _orig_SSLContext_init(self, *args, **kwargs)
+    try:
+        self.options |= _op_ignore
+    except Exception:
+        pass
+
+_ssl.SSLContext.__init__ = _patched_SSLContext_init
+
+# Also patch create_default_context
+try:
+    _orig_cdc = _ssl.create_default_context
+    def _patched_cdc(*args, **kwargs):
+        ctx = _orig_cdc(*args, **kwargs)
+        ctx.options |= _op_ignore
+        return ctx
+    _ssl.create_default_context = _patched_cdc
+except Exception:
+    pass
+
 try:
     from yt_dlp.networking.impersonate import ImpersonateTarget
 except Exception:
     ImpersonateTarget = None
-
-# Deep SSL patch: OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances
-try:
-    import ssl as _ssl
-    _op_ignore = getattr(_ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
-    _orig_SSLContext_init = _ssl.SSLContext.__init__
-    def _patched_SSLContext_init(self, *args, **kwargs):
-        if _orig_SSLContext_init is not object.__init__:
-            _orig_SSLContext_init(self, *args, **kwargs)
-        try:
-            self.options |= _op_ignore
-        except Exception:
-            pass
-    _ssl.SSLContext.__init__ = _patched_SSLContext_init
-except Exception:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +80,9 @@ class Downloader:
         self.default_cookies_file_path = None
         for candidate in [
             os.environ.get("YT_DLP_COOKIES_FILE", ""),
-            "/data/cookies.txt",
-            "/app/data/cookies.txt",
-            "cookies.txt",
+            "/data/cookies.txt",          # HF Spaces persistent volume
+            "/app/data/cookies.txt",       # HF Space container (fallback)
+            "cookies.txt",                  # local working dir
         ]:
             if candidate and Path(candidate).exists() and Path(candidate).stat().st_size > 100:
                 self.default_cookies_file_path = candidate
@@ -72,7 +95,7 @@ class Downloader:
         else:
             logger.warning("[COOKIES] No cookies file found on any known path. YouTube downloads from cloud servers may be blocked.")
 
-        # PO Token (Proof of Origin)
+        # PO Token (Proof of Origin) — helps bypass datacenter IP blocks
         self.po_token = None
         for po_candidate in [
             os.environ.get("YT_DLP_PO_TOKEN_FILE", ""),
@@ -91,6 +114,7 @@ class Downloader:
         if not self.po_token:
             logger.info("[PO TOKEN] Not available — will try android_vr/ios no-cookie fallbacks.")
 
+        # Save custom cookies from request body to a per-job file
         self.cookies_file_path = None
         if cookies and cookies.strip():
             c_file = self.output_dir / "job_cookies.txt"
@@ -102,6 +126,7 @@ class Downloader:
                 logger.error(f"Failed to write custom cookies file: {e}")
 
     def _get_ydl_opts(self, extra_opts: Optional[dict] = None) -> dict:
+        """Construct standard ydl_opts with cookie and client spoofing workarounds."""
         res_limit = "1080"
         if self.resolution == "best":
             video_format = (
@@ -125,22 +150,39 @@ class Downloader:
                 f"best[height<={res_limit}]/best"
             )
 
+        browser_ua = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        )
         opts = {
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 60,
             "retries": 10,
             "fragment_retries": 10,
-            "extractor_retries": 3,       # Limit extraction retries
+            "extractor_retries": 3,
             "file_access_retries": 3,
             "nocheckcertificate": True,
-            "legacyserverconnect": True,
             "source_address": "0.0.0.0",
             "format": video_format,
+            "http_headers": {
+                "User-Agent": browser_ua,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+            },
             "extractor_args": {
                 "youtube": {
-                    "skip": ["webpage"],
-                    "player_client": ["android_vr"]
+                    "skip": ["webpage", "dash", "hls"],
+                    "player_client": ["android_vr"],
+                    "player_skip": ["webpage", "configs", "js"],
                 }
             }
         }
@@ -191,8 +233,9 @@ class Downloader:
     ) -> None:
         if clients:
             existing = opts.get("extractor_args", {}).get("youtube", {})
-            skip = existing.get("skip", ["webpage"])
-            youtube_args = {"player_client": clients, "skip": skip}
+            skip = existing.get("skip", ["webpage", "dash", "hls"])
+            player_skip = existing.get("player_skip", ["webpage", "configs", "js"])
+            youtube_args = {"player_client": clients, "skip": skip, "player_skip": player_skip}
             po_tokens = self._po_tokens(clients) if use_po_token else []
             if po_tokens:
                 youtube_args["po_token"] = po_tokens
@@ -201,6 +244,7 @@ class Downloader:
             opts.pop("extractor_args", None)
 
     def get_video_info(self, url: str) -> VideoInfo:
+        """Fetch video metadata without downloading. Uses deep fallback chain."""
         cookies_path = self.cookies_file_path or self.default_cookies_file_path
         attempts = [
             {"clients": ["web"], "cookiefile": cookies_path, "po": False, "impersonate": True},
@@ -339,16 +383,12 @@ class Downloader:
         url: str,
         job_id: str,
         progress_callback: Optional[Callable] = None,
-        timeout: int = 1200,  # 20-minute hard timeout
+        timeout: int = 1200,
     ) -> tuple[str, str]:
-        """Async wrapper with a hard timeout to prevent infinite hangs."""
         loop = asyncio.get_running_loop()
         try:
             return await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: self.download_video(url, job_id, progress_callback)
-                ),
+                loop.run_in_executor(None, lambda: self.download_video(url, job_id, progress_callback)),
                 timeout=timeout
             )
         except asyncio.TimeoutError:
@@ -359,7 +399,6 @@ class Downloader:
             )
 
     async def get_video_info_async(self, url: str, timeout: int = 180) -> VideoInfo:
-        """Async wrapper with a 3-minute timeout."""
         loop = asyncio.get_running_loop()
         try:
             return await asyncio.wait_for(

@@ -14,12 +14,13 @@ ENV EXPORT_DIR=/app/exports
 ENV ASSETS_DIR=/app/assets
 ENV MODELS_DIR=/app/models
 ENV RUNNING_IN_DOCKER=true
+ENV YT_DLP_COOKIES_FILE=/app/data/cookies.txt
 ENV YT_DLP_PO_TOKEN_FILE=/app/data/po_token.txt
 
 # Set working directory inside container
 WORKDIR /app
 
-# Install system dependencies (ffmpeg is essential, plus opencv/moviepy dependencies, and nodejs for yt-dlp signature deciphering)
+# Install system dependencies (ffmpeg is essential, plus opencv/moviepy dependencies, and libcurl for curl-cffi)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
@@ -27,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     nodejs \
+    libcurl4-openssl-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up user 1000 for Hugging Face Spaces non-root compliance
@@ -36,14 +39,20 @@ RUN mkdir -p /app/data /app/temp /app/exports /app/assets /app/models \
 
 # Copy requirements
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir --upgrade -r requirements.txt yt-dlp 2>&1 | tail -5
+# Upgrade pip, install requirements, then force latest yt-dlp + curl-cffi + certifi
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --upgrade -r requirements.txt && \
+    pip install --no-cache-dir --upgrade yt-dlp curl-cffi certifi && \
+    echo "=== Package versions ===" && \
+    python -c "import yt_dlp; print('yt-dlp:', yt_dlp.version.__version__)" && \
+    python -c "import certifi; print('certifi:', certifi.__version__ if hasattr(certifi, '__version__') else 'ok')" && \
+    python -c "import curl_cffi; print('curl-cffi:', curl_cffi.__version__ if hasattr(curl_cffi, '__version__') else 'ok')" && \
+    echo "========================"
 
 # Copy application source code
 COPY --chown=user:user . /app/
 
 # Seed server cookies for HF fallback — the repo ships valid YouTube cookies in backend/
-# NOTE: cookies.txt is at /app/backend/cookies.txt (not /app/cookies.txt) because
-# the entire repo is COPYed to /app/ and the file lives under the backend/ directory.
 RUN if [ -f /app/backend/cookies.txt ]; then \
       cp /app/backend/cookies.txt /app/data/cookies.txt && \
       chown user:user /app/data/cookies.txt && \

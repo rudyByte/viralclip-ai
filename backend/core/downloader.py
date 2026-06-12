@@ -12,26 +12,50 @@ from typing import Optional, Callable
 import logging
 import ssl
 
+# ── Force certifi CA bundle ──────────────────────────────────────────────
+# HF Spaces often have outdated system CA bundles. Use certifi's instead.
+try:
+    import certifi
+    _ca_bundle = certifi.where()
+    os.environ["SSL_CERT_FILE"] = _ca_bundle
+    os.environ["REQUESTS_CA_BUNDLE"] = _ca_bundle
+    logging.getLogger(__name__).info(f"[SSL] Using certifi CA bundle: {_ca_bundle}")
+except ImportError:
+    logging.getLogger(__name__).warning("[SSL] certifi not installed — using system CA bundle")
+
+# ── Deep SSL patches ─────────────────────────────────────────────────────
+# 1. OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances (fixes EOF on Python 3.11+)
+# 2. Monkey-patch wrap_socket to retry on transient SSL EOF errors
+import ssl as _ssl
+
+_op_ignore = getattr(_ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
+_orig_SSLContext_init = _ssl.SSLContext.__init__
+
+def _patched_SSLContext_init(self, *args, **kwargs):
+    if _orig_SSLContext_init is not object.__init__:
+        _orig_SSLContext_init(self, *args, **kwargs)
+    try:
+        self.options |= _op_ignore
+    except Exception:
+        pass
+
+_ssl.SSLContext.__init__ = _patched_SSLContext_init
+
+# Also patch create_default_context
+try:
+    _orig_cdc = _ssl.create_default_context
+    def _patched_cdc(*args, **kwargs):
+        ctx = _orig_cdc(*args, **kwargs)
+        ctx.options |= _op_ignore
+        return ctx
+    _ssl.create_default_context = _patched_cdc
+except Exception:
+    pass
+
 try:
     from yt_dlp.networking.impersonate import ImpersonateTarget
 except Exception:
     ImpersonateTarget = None
-
-# Deep SSL patch: OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances
-try:
-    import ssl as _ssl
-    _op_ignore = getattr(_ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
-    _orig_SSLContext_init = _ssl.SSLContext.__init__
-    def _patched_SSLContext_init(self, *args, **kwargs):
-        if _orig_SSLContext_init is not object.__init__:
-            _orig_SSLContext_init(self, *args, **kwargs)
-        try:
-            self.options |= _op_ignore
-        except Exception:
-            pass
-    _ssl.SSLContext.__init__ = _patched_SSLContext_init
-except Exception:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +157,11 @@ class Downloader:
                 f"best[height<={res_limit}]/best"
             )
 
+        browser_ua = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        )
         opts = {
             "quiet": True,
             "no_warnings": True,
@@ -141,14 +170,26 @@ class Downloader:
             "fragment_retries": 10,
             "extractor_retries": 3,       # Limit extraction retries — don't hang forever
             "file_access_retries": 3,
-            "nocheckcertificate": True,
-            "legacyserverconnect": True,
+            "nocheckcertificate": True,   # Skip cert validation (YouTube blocks HF IPs anyway)
             "source_address": "0.0.0.0",
             "format": video_format,
+            "http_headers": {
+                "User-Agent": browser_ua,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+            },
             "extractor_args": {
                 "youtube": {
-                    "skip": ["webpage"],  # Skip webpage — hit innerTube API directly
-                    "player_client": ["android_vr"]
+                    "skip": ["webpage", "dash", "hls"],  # Skip webpage + streaming manifest parsing
+                    "player_client": ["android_vr"],        # innerTube API — works without cookies
+                    "player_skip": ["webpage", "configs", "js"],  # Skip JS/player config parsing
                 }
             }
         }
@@ -199,10 +240,11 @@ class Downloader:
         use_po_token: bool = False,
     ) -> None:
         if clients:
-            # Merge with existing extractor_args — PRESERVE skip=webpage and any other settings
+            # Merge with existing extractor_args — PRESERVE skip, player_skip and other settings
             existing = opts.get("extractor_args", {}).get("youtube", {})
-            skip = existing.get("skip", ["webpage"])
-            youtube_args = {"player_client": clients, "skip": skip}
+            skip = existing.get("skip", ["webpage", "dash", "hls"])
+            player_skip = existing.get("player_skip", ["webpage", "configs", "js"])
+            youtube_args = {"player_client": clients, "skip": skip, "player_skip": player_skip}
             po_tokens = self._po_tokens(clients) if use_po_token else []
             if po_tokens:
                 youtube_args["po_token"] = po_tokens

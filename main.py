@@ -1,8 +1,19 @@
 import ssl
 import os
 
-# Deep SSL patch: intercept ALL SSLContext creation to add OP_IGNORE_UNEXPECTED_EOF
-# This fixes ssl.SSLEOFError on Python 3.11 + OpenSSL 3.0+ with YouTube connections
+# ── Force certifi CA bundle (HF Spaces have outdated system CAs) ──────────
+try:
+    import certifi
+    _ca_bundle = certifi.where()
+    os.environ["SSL_CERT_FILE"] = _ca_bundle
+    os.environ["REQUESTS_CA_BUNDLE"] = _ca_bundle
+except ImportError:
+    pass
+
+# ── Deep SSL patches ──────────────────────────────────────────────────────
+# 1. OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances (fixes EOF on Python 3.11+)
+# 2. Disable TLS 1.3 to work around YouTube edge server issues
+
 try:
     _op_ignore = getattr(ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
     _orig_SSLContext_init = ssl.SSLContext.__init__
@@ -14,7 +25,7 @@ try:
         except Exception:
             pass
     ssl.SSLContext.__init__ = _patched_SSLContext_init
-    # Also patch create_default_context as a belt-and-suspenders approach
+    # Also patch create_default_context
     _orig_cdc = ssl.create_default_context
     def _patched_cdc(*args, **kwargs):
         ctx = _orig_cdc(*args, **kwargs)
