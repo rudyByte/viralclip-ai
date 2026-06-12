@@ -1,0 +1,18 @@
+name: Keep HF Space Awake
+
+on:
+  schedule:
+    # Every 14 minutes — HF Spaces sleep after 15 min on free tier
+    - cron: '*/14 * * * *'
+  workflow_dispatch:  # manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake HF Space
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" "https://josephgeorge-viralclip-backend.hf.space/health"
+      - name: Wake Frontend
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" "https://frontend-six-navy-96.vercel.app"
