@@ -251,17 +251,16 @@ async def run_pipeline(
                 # Check if we at least got transcript + viral moments analysis
                 mom_path = temp_dir / "viral_moments.json"
                 have_analysis = mom_path.exists()
+                msg = (
+                    "YouTube blocked this Hugging Face server from downloading the source video. "
+                    "This is a YouTube cloud/IP block, not your phone. "
+                    "Fix: open Settings, save a fresh YouTube PO Token, then submit again. "
+                )
                 if have_analysis:
-                    msg = (
-                        "YouTube blocked the video download from this server. "
-                        "The AI transcript analysis was completed! "
-                        "Go to Settings > YouTube Cookies on a PC, export your cookies from Chrome, "
-                        "save them. Then re-submit. Transcript is cached. "
-                        f"Error: {dl_err[:200]}"
-                    )
-                    await update_job_status(job_id, "error", 0, "", msg)
-                    return
-                raise  # Re-raise if we have no useful data
+                    msg += "Transcript analysis finished and is cached, so retry should skip that part. "
+                msg += f"Last error: {dl_err[:300]}"
+                await update_job_status(job_id, "error", 0, "", msg)
+                return
 
             async with AsyncSessionLocal() as db:
                 from sqlalchemy import update as sq_update

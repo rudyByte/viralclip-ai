@@ -252,6 +252,20 @@ class Downloader:
         else:
             opts.pop("extractor_args", None)
 
+    def _cloud_fast_fail_attempts(self, attempts: list[dict]) -> list[dict]:
+        """Keep cloud retries useful but avoid long phone-visible stalls when no PO Token exists."""
+        if self.po_token:
+            return attempts
+        if os.environ.get("RUNNING_IN_DOCKER") or os.path.exists("/app"):
+            preferred = []
+            for clients in (["android_vr", "android_creator"], ["android_vr"], ["tv_embedded"], ["mweb"], None):
+                for attempt in attempts:
+                    if attempt["clients"] == clients:
+                        preferred.append(attempt)
+                        break
+            return preferred
+        return attempts
+
     def get_video_info(self, url: str) -> VideoInfo:
         """Fetch video metadata without downloading. Uses deep fallback chain."""
         cookies_path = self.cookies_file_path or self.default_cookies_file_path
@@ -272,6 +286,7 @@ class Downloader:
             {"clients": None, "cookiefile": cookies_path, "po": False, "impersonate": True},
             {"clients": None, "cookiefile": None, "po": False, "impersonate": False},
         ]
+        attempts = self._cloud_fast_fail_attempts(attempts)
         last_error = None
         for attempt, attempt_cfg in enumerate(attempts, start=1):
             try:
@@ -353,6 +368,7 @@ class Downloader:
             {"format": "best", "clients": None, "cookiefile": cookies_path, "po": False, "impersonate": True},
             {"format": "best", "clients": None, "cookiefile": None, "po": False, "impersonate": False},
         ]
+        attempts = self._cloud_fast_fail_attempts(attempts)
 
         for attempt, attempt_cfg in enumerate(attempts, start=1):
             try:
@@ -377,7 +393,7 @@ class Downloader:
                 break  # Success
             except Exception as dl_err:
                 if attempt < len(attempts):
-                    wait = 8 * attempt
+                    wait = 3 * attempt
                     logger.warning(f"Download attempt {attempt} failed: {dl_err}. Retrying in {wait}s...")
                     time.sleep(wait)
                 else:
@@ -411,7 +427,7 @@ class Downloader:
         url: str,
         job_id: str,
         progress_callback: Optional[Callable] = None,
-        timeout: int = 1200,  # 20-minute hard timeout
+        timeout: int = 360,  # 6-minute hard timeout
     ) -> tuple[str, str]:
         """Async wrapper for download_video with a hard timeout to prevent infinite hangs."""
         loop = asyncio.get_running_loop()
@@ -430,7 +446,7 @@ class Downloader:
                 f"Try saving a valid PO Token in Settings > YouTube PO Token."
             )
 
-    async def get_video_info_async(self, url: str, timeout: int = 180) -> VideoInfo:
+    async def get_video_info_async(self, url: str, timeout: int = 90) -> VideoInfo:
         """Async wrapper for get_video_info with a 3-minute timeout."""
         loop = asyncio.get_running_loop()
         try:
