@@ -200,6 +200,10 @@ class Downloader:
                             opts["extractor_args"][ext] = args
                 else:
                     opts[k] = v
+        proxy_url = os.environ.get("YT_DLP_PROXY_URL", "").strip()
+        if proxy_url:
+            opts["proxy"] = proxy_url
+            logger.info("[PROXY] yt-dlp proxy enabled via YT_DLP_PROXY_URL")
         return opts
 
     def _add_impersonation(self, opts: dict) -> dict:

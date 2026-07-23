@@ -25,6 +25,12 @@ api.interceptors.response.use(
 export const processVideo = (data) =>
   api.post('/video/process', data).then((r) => r.data)
 
+export const uploadVideo = (formData) =>
+  api.post('/video/upload', formData, {
+    timeout: 0,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then((r) => r.data)
+
 export const getJobStatus = (jobId) =>
   api.get(`/video/status/${jobId}`).then((r) => r.data)
 

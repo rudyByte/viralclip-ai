@@ -9,7 +9,8 @@ import uuid
 import asyncio
 import logging
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from pydantic import BaseModel, HttpUrl
@@ -122,6 +123,68 @@ async def process_video(
         "job_ids": job_ids,
         "status": "queued",
         "message": f"Successfully queued {len(job_ids)} video clip jobs."
+    }
+
+
+@router.post("/upload")
+async def upload_video(
+    file: UploadFile = File(...),
+    clip_min_duration: int = Form(30),
+    clip_max_duration: int = Form(60),
+    num_clips: int = Form(5),
+    caption_style: str = Form("hormozi"),
+    background_type: str = Form("subway"),
+    layout_template: str = Form("split_50_50"),
+    resolution: str = Form("1080p"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a source video directly, bypassing YouTube download blocks."""
+    if num_clips < 1 or num_clips > 20:
+        raise HTTPException(status_code=400, detail="num_clips must be between 1 and 20")
+    if not file.content_type or not file.content_type.startswith("video/"):
+        raise HTTPException(status_code=400, detail="Please upload a video file")
+
+    job_id = str(uuid.uuid4())
+    temp_dir = Path(settings.temp_dir) / job_id
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    video_path = temp_dir / f"{job_id}_video.mp4"
+
+    size = 0
+    try:
+        with open(video_path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > 1024 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="Video file is too large. Max 1GB.")
+                out.write(chunk)
+    finally:
+        await file.close()
+
+    job = Job(
+        id=job_id,
+        youtube_url=f"uploaded://{file.filename or 'source-video'}",
+        title=file.filename or "Uploaded video",
+        status="queued",
+        progress=0,
+        video_path=str(video_path),
+        clip_min_duration=clip_min_duration,
+        clip_max_duration=clip_max_duration,
+        num_clips=num_clips,
+        caption_style=caption_style,
+        background_type=background_type,
+        layout_template=layout_template,
+        resolution=resolution,
+        created_at=datetime.utcnow(),
+    )
+    db.add(job)
+    await db.commit()
+    logger.info(f"Queued uploaded video job {job_id} ({size} bytes)")
+
+    return {
+        "job_id": job_id,
+        "job_ids": [job_id],
+        "status": "queued",
+        "message": "Uploaded video queued for clipping."
     }
 
 

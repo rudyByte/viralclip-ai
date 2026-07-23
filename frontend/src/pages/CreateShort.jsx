@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { 
   Youtube, Sliders, Type, Gamepad2, Play, Sparkles, 
-  ChevronRight, ArrowLeft, Loader2 
+  ChevronRight, ArrowLeft, Loader2, Upload 
 } from 'lucide-react'
-import { processVideo } from '@/lib/api'
+import { processVideo, uploadVideo } from '@/lib/api'
 import { loadDefaults, saveDefaults } from '@/lib/settings'
 import toast from 'react-hot-toast'
 
@@ -32,8 +32,8 @@ const LAYOUT_TEMPLATES = [
   { id: 'no_gameplay', name: 'Full Portrait 9:16', desc: 'Full screen crop of the main video, no gameplay background.', badge: 'Classic' },
 ]
 
-const MAX_BATCH_URLS = 100
-const MAX_CLIPS = 50
+const MAX_BATCH_URLS = 20
+const MAX_CLIPS = 20
 
 export default function CreateShort() {
   const navigate = useNavigate()
@@ -47,6 +47,7 @@ export default function CreateShort() {
   const [layoutTemplate, setLayoutTemplate] = useState(defaults.layoutTemplate)
   const [resolution, setResolution] = useState(defaults.resolution)
   const [cookies, setCookies] = useState('')
+  const [videoFile, setVideoFile] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const urlCount = url.split(/[\n,]+/).map(u => u.trim()).filter(Boolean).length
 
@@ -62,18 +63,8 @@ export default function CreateShort() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!url) return toast.error('Please enter at least one YouTube URL')
-    
     const urls = url.split(/[\n,]+/).map(u => u.trim()).filter(Boolean)
-    if (urls.length === 0) return toast.error('Please enter at least one YouTube URL')
-
-    // Simple YouTube URL Regex check
-    const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/
-    for (const u of urls) {
-      if (!ytRegex.test(u)) {
-        return toast.error(`Invalid YouTube URL: "${u}"`)
-      }
-    }
+    if (!videoFile && urls.length === 0) return toast.error('Paste a YouTube URL or upload a video file')
 
     if (minDuration >= maxDuration) {
       return toast.error('Minimum duration must be less than maximum duration')
@@ -81,21 +72,39 @@ export default function CreateShort() {
 
     setSubmitting(true)
     try {
-      const response = await processVideo({
-        youtube_urls: urls.slice(0, MAX_BATCH_URLS),
-        clip_min_duration: parseInt(minDuration),
-        clip_max_duration: parseInt(maxDuration),
-        num_clips: parseInt(numClips),
-        caption_style: captionStyle,
-        background_type: backgroundType,
-        layout_template: layoutTemplate,
-        resolution: resolution,
-        cookies: cookies || null
-      })
+      let response
+      if (videoFile) {
+        const formData = new FormData()
+        formData.append('file', videoFile)
+        formData.append('clip_min_duration', parseInt(minDuration))
+        formData.append('clip_max_duration', parseInt(maxDuration))
+        formData.append('num_clips', parseInt(numClips))
+        formData.append('caption_style', captionStyle)
+        formData.append('background_type', backgroundType)
+        formData.append('layout_template', layoutTemplate)
+        formData.append('resolution', resolution)
+        response = await uploadVideo(formData)
+      } else {
+        const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/
+        for (const u of urls) {
+          if (!ytRegex.test(u)) return toast.error(`Invalid YouTube URL: "${u}"`)
+        }
+        response = await processVideo({
+          youtube_urls: urls.slice(0, MAX_BATCH_URLS),
+          clip_min_duration: parseInt(minDuration),
+          clip_max_duration: parseInt(maxDuration),
+          num_clips: parseInt(numClips),
+          caption_style: captionStyle,
+          background_type: backgroundType,
+          layout_template: layoutTemplate,
+          resolution: resolution,
+          cookies: cookies || null
+        })
+      }
       
       toast.success(response.message || 'Job(s) queued successfully!')
       // Save to localStorage so user can return later from any device
-      saveToHistory(response.job_id, urls[0])
+      saveToHistory(response.job_id, videoFile?.name || urls[0])
       navigate(`/results/${response.job_id}`)
     } catch (err) {
       console.error(err)
@@ -167,6 +176,35 @@ export default function CreateShort() {
               rows={4}
               className="w-full pl-12 pr-4 py-3 rounded-xl bg-surface-900 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-medium text-base font-mono resize-y"
             />
+          </div>
+          <div className="rounded-xl border border-dashed border-white/15 bg-surface-900/60 p-4">
+            <label className="flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer">
+              <span className="w-11 h-11 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-300">
+                <Upload className="w-5 h-5" />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-bold text-white">Upload video file instead</span>
+                <span className="block text-xs text-slate-400 truncate">
+                  {videoFile ? videoFile.name : 'Bypasses YouTube blocks completely. Works from phone if the video file is on your device.'}
+                </span>
+              </span>
+              <input
+                type="file"
+                accept="video/*"
+                disabled={submitting}
+                onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+            </label>
+            {videoFile && (
+              <button
+                type="button"
+                onClick={() => setVideoFile(null)}
+                className="mt-3 text-xs text-slate-400 hover:text-white"
+              >
+                Remove uploaded file
+              </button>
+            )}
           </div>
         </div>
 
