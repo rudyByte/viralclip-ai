@@ -62,24 +62,31 @@ def get_youtube_transcript(video_id: str) -> Transcript | None:
         return None
 
     languages = ["en", "hi", "gu"]
+    api = YouTubeTranscriptApi()
     try:
-        items = YouTubeTranscriptApi.get_transcript(video_id, languages=languages)
-        return _segments_to_transcript(items, language=",".join(languages))
+        items = api.fetch(video_id, languages=languages)
+        if items:
+            return _segments_to_transcript(items, language=",".join(languages))
     except (NoTranscriptFound, TranscriptsDisabled):
         pass
     except Exception as exc:
         logger.warning(f"Manual transcript fetch failed for {video_id}: {exc}")
 
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript_list = api.list(video_id)
         for lang in languages:
             try:
                 transcript = transcript_list.find_generated_transcript([lang])
-                return _segments_to_transcript(transcript.fetch(), language=lang)
+                fetched = transcript.fetch()
+                if fetched:
+                    return _segments_to_transcript(fetched, language=lang)
             except Exception:
                 continue
-        for transcript in transcript_list:
-            return _segments_to_transcript(transcript.fetch(), language=getattr(transcript, "language_code", "unknown"))
+        # Fall back to any available transcript
+        for t in transcript_list:
+            fetched = t.fetch()
+            if fetched:
+                return _segments_to_transcript(fetched, language=getattr(t, "language_code", "unknown"))
     except Exception as exc:
         logger.warning(f"No YouTube transcript available for {video_id}: {exc}")
 
@@ -89,4 +96,11 @@ def get_youtube_transcript(video_id: str) -> Transcript | None:
 async def get_youtube_transcript_async(video_id: str) -> Transcript | None:
     import asyncio
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: get_youtube_transcript(video_id))
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: get_youtube_transcript(video_id)),
+            timeout=20,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"YouTube transcript fetch timed out for {video_id}; using download/Whisper fallback.")
+        return None
