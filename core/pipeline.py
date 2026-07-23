@@ -253,7 +253,8 @@ async def run_pipeline(
                 msg = (
                     "YouTube blocked this Hugging Face server from downloading the source video. "
                     "This is a YouTube cloud/IP block, not your phone. "
-                    "Fix: open Settings, save a fresh YouTube PO Token, then submit again. "
+                    "Best fix: upload the source video file instead; this bypasses YouTube completely. "
+                    "For paste-link mode, add a residential proxy in YT_DLP_PROXY_URL. "
                 )
                 if have_analysis:
                     msg += "Transcript analysis finished and is cached, so retry should skip that part. "

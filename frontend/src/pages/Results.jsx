@@ -388,6 +388,7 @@ export default function Results() {
   }
 
   const isProcessing = job && !['done', 'error'].includes(job.status)
+  const isYouTubeBlocked = job?.status === 'error' && /youtube|sign in|bot|blocked|po token|cookies/i.test(job?.error_message || '')
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 md:space-y-8 min-h-screen">
@@ -526,9 +527,17 @@ export default function Results() {
               <div className="bg-surface-900 border border-white/10 rounded-xl p-4 text-xs font-mono text-pink-300 mt-4 text-left max-h-40 overflow-y-auto">
                 {job.error_message || 'Unknown server execution error.'}
               </div>
+              {isYouTubeBlocked && (
+                <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-4 text-left text-sm text-green-100 space-y-2">
+                  <p className="font-bold text-green-300">Fast workaround</p>
+                  <p>Download the source video to your phone, then use Create → Upload video file instead. This avoids YouTube/HF blocking completely.</p>
+                </div>
+              )}
             </div>
             <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-              <button onClick={() => navigate('/create')} className="btn-primary">Try Another Video</button>
+              <button onClick={() => navigate('/create')} className="btn-primary">
+                {isYouTubeBlocked ? 'Upload Video File' : 'Try Another Video'}
+              </button>
               <button onClick={() => navigate('/')} className="btn-ghost">Back to Dashboard</button>
             </div>
           </motion.div>

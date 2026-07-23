@@ -447,7 +447,7 @@ class Downloader:
             raise TimeoutError(
                 f"Video download timed out after {timeout // 60} minutes. "
                 f"YouTube may be rate-limiting or blocking the server IP. "
-                f"Try saving a valid PO Token in Settings > YouTube PO Token."
+                f"Upload the video file instead, or configure YT_DLP_PROXY_URL for paste-link mode."
             )
 
     async def get_video_info_async(self, url: str, timeout: int = 90) -> VideoInfo:

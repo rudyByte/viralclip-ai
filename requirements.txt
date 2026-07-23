@@ -12,7 +12,7 @@ aiosqlite==0.20.0
 asyncpg==0.29.0
 
 # Video Downloading
-yt-dlp
+yt-dlp==2026.7.4
 yt-dlp-ejs
 curl-cffi==0.13.0
 youtube-transcript-api==0.6.3
