@@ -55,6 +55,68 @@ async def _get_job(job_id: str) -> Optional[Job]:
         return result.scalars().first()
 
 
+def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_duration: int) -> list[ViralMoment]:
+    """Local fallback when Groq is unavailable: pick dense spoken windows with clear boundaries."""
+    segments = list(getattr(transcript, "segments", []) or [])
+    if not segments:
+        return []
+
+    target_duration = max(min_duration, min(max_duration, 45))
+    keyword_bonus = (
+        "secret", "mistake", "problem", "money", "truth", "never", "always", "why",
+        "how", "best", "worst", "important", "learn", "change", "growth", "win",
+    )
+    candidates = []
+    for idx, seg in enumerate(segments):
+        start = max(0.0, float(seg.start))
+        end_limit = min(float(getattr(transcript, "duration", 0) or segments[-1].end), start + max_duration)
+        window_text = []
+        end = start
+        for nxt in segments[idx:]:
+            if float(nxt.end) - start > max_duration:
+                break
+            window_text.append((nxt.text or "").strip())
+            end = float(nxt.end)
+            if end - start >= target_duration:
+                break
+        duration = end - start
+        if duration < min_duration:
+            continue
+        text = " ".join(window_text).strip()
+        if not text:
+            continue
+        words = text.split()
+        lower = text.lower()
+        score = min(95, 55 + min(len(words) // 5, 20) + sum(3 for k in keyword_bonus if k in lower))
+        candidates.append((score, start, min(end, end_limit), text[:140]))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    moments = []
+    for score, start, end, text in candidates:
+        if any(min(end, m.end_time) > max(start, m.start_time) for m in moments):
+            continue
+        moments.append(ViralMoment(
+            start_time=start,
+            end_time=end,
+            score=score,
+            reason=f"Local fallback selected a dense spoken segment: {text}",
+            hook_words=text[:80],
+            scores={
+                "curiosity_hook": 7,
+                "emotional_intensity": 6,
+                "controversy": 5,
+                "storytelling": 7,
+                "novelty": 6,
+                "retention": 7,
+                "audience_hook": 7,
+                "educational_value": 6,
+            },
+        ))
+        if len(moments) >= num_clips:
+            break
+    return moments
+
+
 async def run_pipeline(
     job_id: str,
     youtube_url: str,
@@ -345,6 +407,11 @@ async def run_pipeline(
                 min_duration=clip_min_duration,
                 max_duration=clip_max_duration,
             )
+            if not viral_moments:
+                logger.warning(f"[{job_id}] Groq returned no moments; using local heuristic fallback.")
+                viral_moments = _fallback_viral_moments(
+                    transcript, num_clips, clip_min_duration, clip_max_duration
+                )
 
             # Persist so future retries skip this expensive step
             moments_json = [
