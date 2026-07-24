@@ -5,6 +5,7 @@ Uses faster-whisper large-v3-turbo for local, fast, accurate transcription.
 import asyncio
 import json
 import logging
+import subprocess
 from pathlib import Path
 from typing import Optional, Callable
 from dataclasses import dataclass, asdict
@@ -133,6 +134,25 @@ class Transcriber:
             )
             logger.info("Whisper model loaded successfully")
         return Transcriber._model
+
+    def _probe_duration(self, audio_path: str) -> float:
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    audio_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if result.returncode == 0:
+                return max(0.0, float((result.stdout or "0").strip() or 0))
+        except Exception as exc:
+            logger.warning(f"Could not probe audio duration for {audio_path}: {exc}")
+        return 0.0
 
     def transcribe(
         self,

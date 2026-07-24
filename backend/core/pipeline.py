@@ -59,7 +59,38 @@ def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_d
     """Local fallback when Groq is unavailable: pick dense spoken windows with clear boundaries."""
     segments = list(getattr(transcript, "segments", []) or [])
     if not segments:
-        return []
+        duration = float(getattr(transcript, "duration", 0) or 0)
+        if duration <= 0:
+            return []
+        target_duration = max(min_duration, min(max_duration, 45))
+        usable_duration = max(min(duration, max_duration), min_duration)
+        clip_duration = min(target_duration, usable_duration)
+        span = max(duration - clip_duration, 0)
+        count = max(1, min(num_clips, int(duration // max(clip_duration, 1)) or 1))
+        moments = []
+        for idx in range(count):
+            start = 0.0 if count == 1 else (span * idx / max(count - 1, 1))
+            end = min(duration, start + clip_duration)
+            if end - start < 1:
+                continue
+            moments.append(ViralMoment(
+                start_time=start,
+                end_time=end,
+                score=45,
+                reason="No speech was detected; selected a clean visual segment by duration.",
+                hook_words="No speech detected",
+                scores={
+                    "curiosity_hook": 4,
+                    "emotional_intensity": 4,
+                    "controversy": 2,
+                    "storytelling": 3,
+                    "novelty": 4,
+                    "retention": 5,
+                    "audience_hook": 4,
+                    "educational_value": 2,
+                },
+            ))
+        return moments
 
     target_duration = max(min_duration, min(max_duration, 45))
     keyword_bonus = (
@@ -360,7 +391,17 @@ async def run_pipeline(
                 device=settings.whisper_device,
                 compute_type=settings.whisper_compute_type,
             )
-            transcript = await transcriber.transcribe_async(audio_path, progress_callback=transcribe_progress)
+            try:
+                transcript = await transcriber.transcribe_async(audio_path, progress_callback=transcribe_progress)
+            except ValueError as exc:
+                if "max() arg is an empty sequence" not in str(exc):
+                    raise
+                duration = transcriber._probe_duration(audio_path)
+                logger.warning(
+                    f"[{job_id}] Whisper found no speech; using visual-only fallback transcript ({duration:.1f}s)."
+                )
+                from core.transcriber import Transcript
+                transcript = Transcript(language="unknown", duration=duration, segments=[], full_text="")
 
             transcript_path = str(cached_transcript)
             transcriber.save_transcript(transcript, transcript_path)
