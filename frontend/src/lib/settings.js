@@ -4,7 +4,7 @@ export const defaultSettings = {
   clipMinDuration: 30,
   clipMaxDuration: 60,
   captionStyle: 'hormozi',
-  backgroundType: 'none',
+  backgroundType: 'subway',
   layoutTemplate: 'split_50_50',
   resolution: '720p',
   numClips: 3,

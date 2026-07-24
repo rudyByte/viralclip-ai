@@ -28,6 +28,14 @@ settings = get_settings()
 _running_jobs: set[str] = set()
 
 
+def _normalize_layout(background_type: str, layout_template: str) -> tuple[str, str]:
+    background = (background_type or "subway").strip()
+    layout = (layout_template or "split_50_50").strip()
+    if background != "none" and layout == "no_gameplay":
+        layout = "split_50_50"
+    return background, layout
+
+
 class ProcessRequest(BaseModel):
     youtube_url: Optional[str] = None
     youtube_urls: Optional[List[str]] = None
@@ -93,6 +101,7 @@ async def process_video(
         raise HTTPException(status_code=400, detail="No valid YouTube URLs provided")
     if req.num_clips < 1 or req.num_clips > 20:
         raise HTTPException(status_code=400, detail="num_clips must be between 1 and 20")
+    background_type, layout_template = _normalize_layout(req.background_type, req.layout_template)
 
     job_ids = []
     for url in urls:
@@ -106,8 +115,8 @@ async def process_video(
             clip_max_duration=req.clip_max_duration,
             num_clips=req.num_clips,
             caption_style=req.caption_style,
-            background_type=req.background_type,
-            layout_template=req.layout_template,
+            background_type=background_type,
+            layout_template=layout_template,
             resolution=req.resolution,
             cookies=req.cookies,
             created_at=datetime.utcnow(),
@@ -143,6 +152,7 @@ async def upload_video(
         raise HTTPException(status_code=400, detail="num_clips must be between 1 and 20")
     if not file.content_type or not file.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail="Please upload a video file")
+    background_type, layout_template = _normalize_layout(background_type, layout_template)
 
     job_id = str(uuid.uuid4())
     temp_dir = Path(settings.temp_dir) / job_id
