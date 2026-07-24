@@ -223,11 +223,15 @@ class BackgroundMixer:
         """Get a random gameplay clip from the assets folder."""
         gameplay_dir = self.assets_dir / "gameplay" / background_type
         if not gameplay_dir.exists():
-            return None
+            gameplay_dir = self.assets_dir / "gameplay" / "subway"
 
         clips = list(gameplay_dir.glob("*.mp4")) + list(gameplay_dir.glob("*.mov"))
         if not clips:
-            return None
+            subway_dir = self.assets_dir / "gameplay" / "subway"
+            if gameplay_dir != subway_dir:
+                clips = list(subway_dir.glob("*.mp4")) + list(subway_dir.glob("*.mov"))
+            if not clips:
+                return None
 
         return str(random.choice(clips))
 

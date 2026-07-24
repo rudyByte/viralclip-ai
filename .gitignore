@@ -38,6 +38,7 @@ assets/gameplay/**/*.mp4
 assets/gameplay/**/*.mov
 assets/gameplay/**/*.avi
 assets/gameplay/**/*.mkv
+!assets/gameplay/**/sample_*.mp4
 
 # Python caching & Virtual Environments
 __pycache__/
