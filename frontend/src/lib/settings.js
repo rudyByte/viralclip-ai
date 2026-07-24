@@ -8,12 +8,20 @@ export const defaultSettings = {
   layoutTemplate: 'split_50_50',
   resolution: '720p',
   numClips: 3,
+  gameplayDefaultsVersion: 2,
 }
 
 export function loadDefaults() {
   try {
     const saved = localStorage.getItem(DEFAULTS_KEY)
-    return saved ? { ...defaultSettings, ...JSON.parse(saved) } : defaultSettings
+    if (!saved) return defaultSettings
+    const parsed = JSON.parse(saved)
+    const merged = { ...defaultSettings, ...parsed }
+    if ((parsed.gameplayDefaultsVersion || 1) < 2 && merged.backgroundType === 'none') {
+      merged.backgroundType = 'subway'
+      merged.layoutTemplate = 'split_50_50'
+    }
+    return merged
   } catch {
     return defaultSettings
   }
