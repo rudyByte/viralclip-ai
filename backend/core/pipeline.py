@@ -66,7 +66,9 @@ def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_d
         usable_duration = max(min(duration, max_duration), min_duration)
         clip_duration = min(target_duration, usable_duration)
         span = max(duration - clip_duration, 0)
-        count = max(1, min(num_clips, int(duration // max(clip_duration, 1)) or 1))
+        # Maximum non-overlapping clips that fit in the video
+        max_possible = max(1, int(duration // clip_duration))
+        count = max(1, min(num_clips, max_possible))
         moments = []
         for idx in range(count):
             start = 0.0 if count == 1 else (span * idx / max(count - 1, 1))

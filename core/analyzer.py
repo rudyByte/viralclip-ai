@@ -15,14 +15,16 @@ logger = logging.getLogger(__name__)
 
 # Compact prompt — ~200 tokens vs ~500 previously
 VIRAL_DETECTION_PROMPT = """You are a viral video editor and content strategist. 
-Identify the top {num_clips} viral segments in the transcript below.
+Identify UP TO {num_clips} viral segments in the transcript below. Return as many as exist (up to {num_clips}), ranked by score descending. Do NOT return overlapping segments.
 
 CRITICAL REQUIREMENTS:
 1. Target Duration: Each segment must be strictly between {min_duration} and {max_duration} seconds long (duration = end_time - start_time).
 2. Hook/Start: The start_time must mark a strong hook or the beginning of an interesting idea.
 3. Logical Ending: The end_time must be a logical cut-off point (e.g., at the end of a sentence, a punchline, or a completed thought). Do not cut off mid-phrase, mid-sentence, or in a way that leaves the viewer hanging without context.
 4. Timestamps: All timestamps are in RAW SECONDS (e.g. 180.0, not 3:00). Return start_time and end_time as float seconds.
-5. Multilingual support: The transcript might be in English, Hindi, Gujarati, or any other language. Analyze it carefully to find the best viral segments. The reason must be in English, but hook_words should be in the original language.
+5. Non-overlapping: No two segments may share any overlapping time range.
+6. Ranked: Sort results by score descending (highest virality first).
+7. Multilingual support: The transcript might be in English, Hindi, Gujarati, or any other language. Analyze it carefully to find the best viral segments. The reason must be in English, but hook_words should be in the original language.
 
 TRANSCRIPT:
 {transcript}
@@ -241,7 +243,8 @@ class GroqAnalyzer:
         # Reduced to 5000 chars to stay safely within Groq TPM limits
         max_chars = 5000
         batches = self._split_transcript_into_batches(transcript_chunks, max_chars)
-        clips_per_batch = max(2, num_clips // len(batches) + 1)
+        # Ask each batch for more clips than needed; dedup + top-N at the end
+        clips_per_batch = max(num_clips, num_clips // max(len(batches), 1) + num_clips)
 
         logger.info(f"Analyzing {len(batches)} batches with {self.detection_model} for {clips_per_batch} clips/batch")
 
@@ -264,11 +267,13 @@ class GroqAnalyzer:
 
             raw = ""
             try:
+                # ~150 tokens per clip JSON object; cap at 4096 for large num_clips
+                dynamic_max_tokens = min(4096, max(1024, clips_per_batch * 180))
                 raw = await self._call_groq_with_retry(
                     model=self.detection_model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
-                    max_tokens=1024,
+                    max_tokens=dynamic_max_tokens,
                 )
 
                 clean = self._clean_json_response(raw)
