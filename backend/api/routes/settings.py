@@ -106,6 +106,29 @@ def delete_po_token():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/groq-status")
+def get_groq_status():
+    """Returns whether Groq rate limit was hit recently and estimated reset."""
+    import time
+    from core.analyzer import LAST_GROQ_RATE_LIMIT
+    if not LAST_GROQ_RATE_LIMIT:
+        return {"rate_limited": False, "message": "Groq AI operational"}
+    
+    elapsed = time.time() - LAST_GROQ_RATE_LIMIT.get("timestamp", 0)
+    # Consider rate limit active for 15 minutes after last occurrence unless reset
+    if elapsed > 900:
+        return {"rate_limited": False, "message": "Groq AI operational (previous rate limit expired)"}
+
+    return {
+        "rate_limited": True,
+        "model": LAST_GROQ_RATE_LIMIT.get("model"),
+        "reset_in": LAST_GROQ_RATE_LIMIT.get("reset_in", "a few minutes"),
+        "error": LAST_GROQ_RATE_LIMIT.get("error"),
+        "elapsed_seconds": int(elapsed),
+        "message": f"Groq AI Rate Limit Active ({LAST_GROQ_RATE_LIMIT.get('model')}). Fallback visual engine automatically engaged. Resets in {LAST_GROQ_RATE_LIMIT.get('reset_in', 'a few minutes')}."
+    }
+
+
 @router.get("/logs")
 def get_logs():
     log_file = "/app/data/backend.log"

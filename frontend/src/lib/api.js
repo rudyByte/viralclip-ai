@@ -98,6 +98,9 @@ export const savePoToken = (poToken) =>
 export const deletePoToken = () =>
   api.delete('/settings/potoken').then((r) => r.data)
 
+export const getGroqStatus = () =>
+  api.get('/settings/groq-status').then((r) => r.data)
+
 // ── WebSocket helper ──────────────────────────────────────────────
 export const createJobSocket = (jobId, onMessage, onClose) => {
   const wsBase = API_BASE_URL.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')

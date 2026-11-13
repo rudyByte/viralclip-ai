@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { 
   getJobStatus, getClips, getClipHooks, 
-  regenerateClip, getPreviewUrl, getDownloadUrl, createJobSocket
+  regenerateClip, getPreviewUrl, getDownloadUrl, createJobSocket, getGroqStatus
 } from '@/lib/api'
 import toast from 'react-hot-toast'
 
@@ -105,6 +105,13 @@ export default function Results() {
   const [copiedText, setCopiedText] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
   const [contentTab, setContentTab] = useState('youtube')
+  const [groqNotice, setGroqNotice] = useState(null)
+
+  useEffect(() => {
+    getGroqStatus().then(d => {
+      if (d && d.rate_limited) setGroqNotice(d)
+    }).catch(() => {})
+  }, [])
 
   // Custom video player states
   const [playing, setPlaying] = useState(false)
@@ -448,6 +455,24 @@ export default function Results() {
             <Link className="w-3 h-3" />
             {linkCopied ? 'Copied!' : 'Copy Link'}
           </button>
+        </div>
+      )}
+
+      {/* Groq Rate Limit Notice Banner in Results */}
+      {groqNotice?.rate_limited && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <h4 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+              <span>Groq AI Limit Cool-down Active</span>
+              <span className="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30 font-mono">
+                Resets in: {groqNotice.reset_in}
+              </span>
+            </h4>
+            <p className="text-xs text-amber-200/80 mt-1">
+              The automated Visual Energy & Motion Detection engine was engaged to analyze and clip dynamic action sequences without interruptions.
+            </p>
+          </div>
         </div>
       )}
 

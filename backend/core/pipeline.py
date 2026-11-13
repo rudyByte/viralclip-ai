@@ -55,9 +55,26 @@ async def _get_job(job_id: str) -> Optional[Job]:
         return result.scalars().first()
 
 
-def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_duration: int) -> list[ViralMoment]:
-    """Local fallback when Groq is unavailable: pick dense spoken windows with clear boundaries."""
+def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_duration: int, video_path: Optional[str] = None) -> list[ViralMoment]:
+    """Local fallback: pick dense spoken windows or evaluate visual motion/energy when video is available."""
     segments = list(getattr(transcript, "segments", []) or [])
+    target_duration = max(min_duration, min(max_duration, 45))
+    duration = float(getattr(transcript, "duration", 0) or 0)
+    
+    # 1. First, check visual motion energy if video_path exists
+    visual_intervals = []
+    if video_path and os.path.exists(video_path):
+        try:
+            from utils.visual_scorer import VisualEnergyScorer
+            visual_intervals = VisualEnergyScorer.analyze_intervals(
+                video_path=video_path,
+                total_duration=duration or 300.0,
+                interval_duration=target_duration,
+                step_duration=20.0
+            )
+            logger.info(f"Visual energy analysis generated {len(visual_intervals)} candidate intervals.")
+        except Exception as ve_err:
+            logger.warning(f"Visual energy analysis failed, using fallback timeline: {ve_err}")
     if not segments:
         duration = float(getattr(transcript, "duration", 0) or 0)
         if duration <= 0:
@@ -149,16 +166,40 @@ def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_d
             break
 
     # If the video has fewer spoken segments than requested clips (e.g. sports, highlights, sparse dialogue),
-    # fill remaining clip slots across the rest of the video duration.
+    # fill remaining clip slots using high visual motion energy intervals (or timeline stepping fallback).
     video_dur = float(getattr(transcript, "duration", 0) or (segments[-1].end if segments else 0))
     if len(moments) < num_clips and video_dur > target_duration:
-        # Generate non-overlapping candidate intervals across the video
+        # Use visually engaging intervals first if available
+        for v in visual_intervals:
+            if len(moments) >= num_clips:
+                break
+            v_start, v_end = v["start"], v["end"]
+            overlaps = any(min(v_end, m.end_time) > max(v_start, m.start_time) for m in moments)
+            if not overlaps:
+                moments.append(ViralMoment(
+                    start_time=v_start,
+                    end_time=v_end,
+                    score=v["energy_score"],
+                    reason=f"High visual action/motion moment detected ({int(v_start)}s - {int(v_end)}s)",
+                    hook_words="High energy visual action",
+                    scores={
+                        "curiosity_hook": 7,
+                        "emotional_intensity": 8,
+                        "controversy": 4,
+                        "storytelling": 5,
+                        "novelty": 7,
+                        "retention": 8,
+                        "audience_hook": 7,
+                        "educational_value": 3,
+                    },
+                ))
+
+        # If still need more, step across timeline
         step = max(target_duration, 30.0)
         curr = 0.0
         while curr + min_duration <= video_dur and len(moments) < num_clips:
             clip_end = min(video_dur, curr + target_duration)
             if clip_end - curr >= min_duration:
-                # Check overlap with existing moments
                 overlaps = any(min(clip_end, m.end_time) > max(curr, m.start_time) for m in moments)
                 if not overlaps:
                     moments.append(ViralMoment(
@@ -517,7 +558,7 @@ async def run_pipeline(
             if len(viral_moments) < num_clips:
                 logger.info(f"[{job_id}] Groq detected {len(viral_moments)}/{num_clips} moments; supplementing from video analysis fallback.")
                 fallback_moments = _fallback_viral_moments(
-                    transcript, num_clips, clip_min_duration, clip_max_duration
+                    transcript, num_clips, clip_min_duration, clip_max_duration, video_path=video_path
                 )
                 for fm in fallback_moments:
                     overlaps = any(min(fm.end_time, vm.end_time) > max(fm.start_time, vm.start_time) for vm in viral_moments)

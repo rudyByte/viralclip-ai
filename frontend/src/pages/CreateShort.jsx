@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { 
   Youtube, Sliders, Type, Gamepad2, Play, Sparkles, 
-  ChevronRight, ArrowLeft, Loader2, Upload 
+  ChevronRight, ArrowLeft, Loader2, Upload, AlertCircle, Clock
 } from 'lucide-react'
-import { processVideo, uploadVideo } from '@/lib/api'
+import { processVideo, uploadVideo, getGroqStatus } from '@/lib/api'
 import { loadDefaults, saveDefaults } from '@/lib/settings'
 import toast from 'react-hot-toast'
 
@@ -49,7 +49,16 @@ export default function CreateShort() {
   const [cookies, setCookies] = useState('')
   const [videoFile, setVideoFile] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const [groqStatus, setGroqStatus] = useState(null)
   const urlCount = url.split(/[\n,]+/).map(u => u.trim()).filter(Boolean).length
+
+  useEffect(() => {
+    getGroqStatus().then(data => {
+      if (data && data.rate_limited) {
+        setGroqStatus(data)
+      }
+    }).catch(() => {})
+  }, [])
 
   const currentDefaults = () => ({
     clipMinDuration: parseInt(minDuration),
@@ -151,6 +160,25 @@ export default function CreateShort() {
           Configure your pipeline settings and let LLaMA + Whisper perform their magic.
         </p>
       </div>
+
+      {/* Groq Rate Limit Notice Banner */}
+      {groqStatus?.rate_limited && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <h4 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+              <span>Groq API Rate Limit Notice</span>
+              <span className="text-[10px] bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30 flex items-center gap-1 font-mono">
+                <Clock className="w-3 h-3" />
+                Resets in: {groqStatus.reset_in}
+              </span>
+            </h4>
+            <p className="text-xs text-amber-200/80 mt-1">
+              Your Groq token limit is currently cooling down. The system will automatically use the <strong>Visual Motion & Energy Engine</strong> so your video clipping and processing will continue without interruptions!
+            </p>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-8">
         

@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from typing import Optional
 from groq import AsyncGroq
 
+# Track global groq rate limit status for frontend notification
+LAST_GROQ_RATE_LIMIT = None
+
 logger = logging.getLogger(__name__)
 
 # Compact prompt — ~200 tokens vs ~500 previously
@@ -215,13 +218,28 @@ class GroqAnalyzer:
                     for term in ["rate_limit_exceeded", "429", "413", "payload too large", "too many requests", "limit exceeded"]
                 )
                 
-                if is_rate_limit and attempt < retries - 1:
-                    logger.warning(
-                        f"Groq API rate limit or payload size issue on {model} (Attempt {attempt + 1}/{retries}): {err_str}. "
-                        f"Retrying in {delay}s..."
-                    )
-                    await asyncio.sleep(delay)
-                    delay *= 2.0
+                if is_rate_limit:
+                    global LAST_GROQ_RATE_LIMIT
+                    import time
+                    import re
+                    # Extract wait time if Groq provides 'try again in Xs' or similar
+                    wait_match = re.search(r"try again in (\d+(?:\.\d+)?m?s?)", err_str, re.IGNORECASE)
+                    wait_info = wait_match.group(1) if wait_match else "a few moments"
+                    LAST_GROQ_RATE_LIMIT = {
+                        "model": model,
+                        "timestamp": time.time(),
+                        "error": err_str[:200],
+                        "reset_in": wait_info
+                    }
+                    if attempt < retries - 1:
+                        logger.warning(
+                            f"Groq API rate limit on {model} (Attempt {attempt + 1}/{retries}): {err_str}. Retrying in {delay}s..."
+                        )
+                        await asyncio.sleep(delay)
+                        delay *= 2.0
+                    else:
+                        logger.error(f"Groq API rate limit exhausted: {err_str}")
+                        raise
                 else:
                     logger.error(f"Groq API call failed permanently on attempt {attempt + 1}: {e}")
                     raise
