@@ -132,7 +132,7 @@ def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_d
             start_time=start,
             end_time=end,
             score=score,
-            reason=f"Local fallback selected a dense spoken segment: {text}",
+            reason=f"Selected high-density segment: {text}",
             hook_words=text[:80],
             scores={
                 "curiosity_hook": 7,
@@ -147,7 +147,41 @@ def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_d
         ))
         if len(moments) >= num_clips:
             break
-    return moments
+
+    # If the video has fewer spoken segments than requested clips (e.g. sports, highlights, sparse dialogue),
+    # fill remaining clip slots across the rest of the video duration.
+    video_dur = float(getattr(transcript, "duration", 0) or (segments[-1].end if segments else 0))
+    if len(moments) < num_clips and video_dur > target_duration:
+        # Generate non-overlapping candidate intervals across the video
+        step = max(target_duration, 30.0)
+        curr = 0.0
+        while curr + min_duration <= video_dur and len(moments) < num_clips:
+            clip_end = min(video_dur, curr + target_duration)
+            if clip_end - curr >= min_duration:
+                # Check overlap with existing moments
+                overlaps = any(min(clip_end, m.end_time) > max(curr, m.start_time) for m in moments)
+                if not overlaps:
+                    moments.append(ViralMoment(
+                        start_time=curr,
+                        end_time=clip_end,
+                        score=max(40, 60 - len(moments) * 2),
+                        reason=f"Action/Visual moment selected from video ({int(curr)}s - {int(clip_end)}s)",
+                        hook_words="High action segment",
+                        scores={
+                            "curiosity_hook": 5,
+                            "emotional_intensity": 6,
+                            "controversy": 4,
+                            "storytelling": 5,
+                            "novelty": 5,
+                            "retention": 6,
+                            "audience_hook": 6,
+                            "educational_value": 3,
+                        },
+                    ))
+            curr += step
+
+    moments.sort(key=lambda m: m.score, reverse=True)
+    return moments[:num_clips]
 
 
 async def run_pipeline(
@@ -479,11 +513,21 @@ async def run_pipeline(
                 min_duration=clip_min_duration,
                 max_duration=clip_max_duration,
             )
-            if not viral_moments:
-                logger.warning(f"[{job_id}] Groq returned no moments; using local heuristic fallback.")
-                viral_moments = _fallback_viral_moments(
+            # If Groq returned fewer moments than requested (or none at all), fill up from fallback
+            if len(viral_moments) < num_clips:
+                logger.info(f"[{job_id}] Groq detected {len(viral_moments)}/{num_clips} moments; supplementing from video analysis fallback.")
+                fallback_moments = _fallback_viral_moments(
                     transcript, num_clips, clip_min_duration, clip_max_duration
                 )
+                for fm in fallback_moments:
+                    overlaps = any(min(fm.end_time, vm.end_time) > max(fm.start_time, vm.start_time) for vm in viral_moments)
+                    if not overlaps:
+                        viral_moments.append(fm)
+                    if len(viral_moments) >= num_clips:
+                        break
+
+            viral_moments.sort(key=lambda m: m.score, reverse=True)
+            viral_moments = viral_moments[:num_clips]
 
             # Persist so future retries skip this expensive step
             moments_json = [
