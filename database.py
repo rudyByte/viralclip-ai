@@ -31,7 +31,12 @@ def normalize_database_url(url: str) -> str:
 DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./viralclip.db"))
 
 engine = create_async_engine(DATABASE_URL, echo=False)
-AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+def AsyncSessionLocal() -> AsyncSession:
+    """Return an active async database session from the current engine."""
+    return _session_factory()
 
 
 class Base(DeclarativeBase):
@@ -188,11 +193,35 @@ class UsageLog(Base):
 
 
 async def init_db():
-    """Initialize database tables and add missing columns for backward compatibility."""
+    """Initialize database tables and add missing columns for backward compatibility.
+    Gracefully falls back to local SQLite if remote PostgreSQL is down, unreachable, or exceeds quota.
+    """
+    global engine, _session_factory, DATABASE_URL
     import logging
     db_logger = logging.getLogger("database")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as e:
+        db_logger.error(f"Failed to connect to primary database ({DATABASE_URL}): {e}")
+        if not DATABASE_URL.startswith("sqlite"):
+            from pathlib import Path
+            fallback_path = "/data/viralclip.db" if Path("/data").is_dir() else "./viralclip.db"
+            fallback_url = f"sqlite+aiosqlite:///{fallback_path}"
+            db_logger.warning(f"Falling back to local persistent SQLite at {fallback_url}...")
+            try:
+                await engine.dispose()
+            except Exception:
+                pass
+            DATABASE_URL = fallback_url
+            engine = create_async_engine(DATABASE_URL, echo=False)
+            _session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            db_logger.info("Fallback SQLite database initialized successfully.")
+        else:
+            raise
         
     # Dynamically check and add missing columns if they don't exist
     async with AsyncSessionLocal() as session:

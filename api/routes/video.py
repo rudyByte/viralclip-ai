@@ -151,7 +151,9 @@ async def upload_video(
     if num_clips < 1 or num_clips > 20:
         raise HTTPException(status_code=400, detail="num_clips must be between 1 and 20")
     if not file.content_type or not file.content_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="Please upload a video file")
+        valid_exts = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".flv", ".wmv")
+        if not (file.filename and file.filename.lower().endswith(valid_exts)):
+            raise HTTPException(status_code=400, detail="Please upload a valid video file")
     background_type, layout_template = _normalize_layout(background_type, layout_template)
 
     job_id = str(uuid.uuid4())
@@ -170,12 +172,25 @@ async def upload_video(
     finally:
         await file.close()
 
+    duration = None
+    try:
+        import subprocess
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
+            capture_output=True, text=True, timeout=15
+        )
+        if probe.returncode == 0 and probe.stdout.strip():
+            duration = float(probe.stdout.strip())
+    except Exception as probe_err:
+        logger.warning(f"Failed to probe uploaded video duration: {probe_err}")
+
     job = Job(
         id=job_id,
         youtube_url=f"uploaded://{file.filename or 'source-video'}",
         title=file.filename or "Uploaded video",
         status="queued",
         progress=0,
+        duration_seconds=duration,
         video_path=str(video_path),
         clip_min_duration=clip_min_duration,
         clip_max_duration=clip_max_duration,

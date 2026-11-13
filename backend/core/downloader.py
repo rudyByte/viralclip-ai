@@ -25,7 +25,6 @@ except ImportError:
 
 # ── Deep SSL patches ─────────────────────────────────────────────────────
 # 1. OP_IGNORE_UNEXPECTED_EOF on ALL SSLContext instances (fixes EOF on Python 3.11+)
-# 2. Monkey-patch wrap_socket to retry on transient SSL EOF errors
 import ssl as _ssl
 
 _op_ignore = getattr(_ssl, "OP_IGNORE_UNEXPECTED_EOF", 8388608)
@@ -78,7 +77,6 @@ class Downloader:
         self.resolution = resolution
 
         # Resolve cookies file path — try persistent /data/ first (HF Spaces), then fall back
-        # HF Spaces: /data/ is persistent across restarts but /app/data/ is ephemeral
         self.default_cookies_file_path = None
         for candidate in [
             os.environ.get("YT_DLP_COOKIES_FILE", ""),
@@ -115,7 +113,7 @@ class Downloader:
 
         if not self.po_token:
             logger.info("[PO TOKEN] Not available — will try android_vr/ios no-cookie fallbacks.")
-        
+
         # Save custom cookies from request body to a per-job file
         self.cookies_file_path = None
         if cookies and cookies.strip():
@@ -128,12 +126,7 @@ class Downloader:
                 logger.error(f"Failed to write custom cookies file: {e}")
 
     def _get_ydl_opts(self, extra_opts: Optional[dict] = None) -> dict:
-        """Construct standard ydl_opts with cookie and client spoofing workarounds.
-        
-        Base opts are deliberately minimal — individual attempts configure
-        their own player_client / extractor_args via _apply_youtube_args.
-        """
-        # Determine format based on chosen resolution.
+        """Construct standard ydl_opts with cookie and client spoofing workarounds."""
         res_limit = "1080"
         if self.resolution == "best":
             video_format = (
@@ -168,9 +161,9 @@ class Downloader:
             "socket_timeout": 60,
             "retries": 10,
             "fragment_retries": 10,
-            "extractor_retries": 3,       # Limit extraction retries — don't hang forever
+            "extractor_retries": 3,
             "file_access_retries": 3,
-            "nocheckcertificate": True,   # Skip cert validation (YouTube blocks HF IPs anyway)
+            "nocheckcertificate": True,
             "source_address": "0.0.0.0",
             "format": video_format,
             "http_headers": {
@@ -187,13 +180,12 @@ class Downloader:
             },
             "extractor_args": {
                 "youtube": {
-                    "skip": ["webpage", "dash", "hls"],  # Skip webpage + streaming manifest parsing
-                    "player_client": ["android_vr"],        # innerTube API — works without cookies
-                    "player_skip": ["webpage", "configs", "js"],  # Skip JS/player config parsing
+                    "skip": ["webpage", "dash", "hls"],
+                    "player_client": ["android_vr"],
+                    "player_skip": ["webpage", "configs", "js"],
                 }
             }
         }
-        # Local dev: try browser cookies
         if not os.environ.get("RUNNING_IN_DOCKER"):
             opts["cookiesfrombrowser"] = ("chrome", "firefox", "edge", "safari")
             logger.info("Attempting to use browser cookies (local execution)")
@@ -244,7 +236,6 @@ class Downloader:
         use_po_token: bool = False,
     ) -> None:
         if clients:
-            # Merge with existing extractor_args — PRESERVE skip, player_skip and other settings
             existing = opts.get("extractor_args", {}).get("youtube", {})
             skip = existing.get("skip", ["webpage", "dash", "hls"])
             player_skip = existing.get("player_skip", ["webpage", "configs", "js"])
@@ -273,20 +264,15 @@ class Downloader:
     def get_video_info(self, url: str) -> VideoInfo:
         """Fetch video metadata without downloading. Uses deep fallback chain."""
         cookies_path = self.cookies_file_path or self.default_cookies_file_path
-        # Try 10 different client/extractor strategies in order
         attempts = [
-            # 1-3: Try with cookies on web/mweb/android clients (cookies bypass most IP blocks)
             {"clients": ["web"], "cookiefile": cookies_path, "po": False, "impersonate": True},
             {"clients": ["mweb"], "cookiefile": cookies_path, "po": True, "impersonate": True},
             {"clients": ["android"], "cookiefile": cookies_path, "po": False, "impersonate": False},
-            # 4-6: Try no-cookie approaches with various API clients
             {"clients": ["android_vr", "android_creator"], "cookiefile": None, "po": False, "impersonate": False},
             {"clients": ["ios"], "cookiefile": None, "po": False, "impersonate": False},
             {"clients": ["web_safari"], "cookiefile": None, "po": False, "impersonate": True},
-            # 7-8: Try TV/embedded clients
             {"clients": ["tv_embedded"], "cookiefile": None, "po": False, "impersonate": False},
             {"clients": ["tv"], "cookiefile": None, "po": False, "impersonate": False},
-            # 9-10: Default yt-dlp behavior (no custom extractor_args)
             {"clients": None, "cookiefile": cookies_path, "po": False, "impersonate": True},
             {"clients": None, "cookiefile": None, "po": False, "impersonate": False},
         ]
@@ -322,10 +308,6 @@ class Downloader:
         job_id: str,
         progress_callback: Optional[Callable] = None,
     ) -> tuple[str, str]:
-        """
-        Download video and extract audio.
-        Returns (video_path, audio_path).
-        """
         video_path = str(self.output_dir / f"{job_id}_video.mp4")
         audio_path = str(self.output_dir / f"{job_id}_audio.wav")
 
@@ -336,39 +318,32 @@ class Downloader:
                 pct = int((downloaded / total) * 100) if total else 0
                 progress_callback(pct)
 
-        # Base download options (format key removed to avoid overriding format determined in _get_ydl_opts)
         base_opts = {
             "outtmpl": video_path,
             "merge_output_format": "mp4",
             "progress_hooks": [progress_hook],
-            "continuedl": True,          # Resume partial downloads
-            "http_chunk_size": 10485760,  # 10MB chunks — fewer TCP hangs
-            "sleep_interval_requests": 2, # Pause between retries
-            "throttledratelimit": 100000, # 100KB/s min — triggers retry if throttled below
+            "continuedl": True,
+            "http_chunk_size": 10485760,
+            "sleep_interval_requests": 2,
+            "throttledratelimit": 100000,
             "postprocessors": [{
                 "key": "FFmpegVideoConvertor",
                 "preferedformat": "mp4",
             }],
         }
-        
+
         ydl_opts = self._get_ydl_opts(base_opts)
 
-        # Escalating fallback chain — tries cookies-first (often bypasses IP blocks),
-        # then multiple API client types, then raw extraction.
         cookies_path = self.cookies_file_path or self.default_cookies_file_path
         attempts = [
-            # Cookies-based approaches (most likely to work on datacenter IPs)
             {"format": None, "clients": ["web"], "cookiefile": cookies_path, "po": False, "impersonate": True},
             {"format": None, "clients": ["mweb"], "cookiefile": cookies_path, "po": True, "impersonate": True},
             {"format": None, "clients": ["android"], "cookiefile": cookies_path, "po": False, "impersonate": False},
-            # No-cookie API client approaches
             {"format": None, "clients": ["android_vr"], "cookiefile": None, "po": False, "impersonate": False},
             {"format": None, "clients": ["ios"], "cookiefile": None, "po": False, "impersonate": False},
             {"format": None, "clients": ["web_safari"], "cookiefile": None, "po": False, "impersonate": True},
-            # TV clients
             {"format": "best", "clients": ["tv_embedded"], "cookiefile": None, "po": False, "impersonate": False},
             {"format": "best", "clients": ["tv"], "cookiefile": None, "po": False, "impersonate": False},
-            # Default yt-dlp (no custom extractor_args)
             {"format": "best", "clients": None, "cookiefile": cookies_path, "po": False, "impersonate": True},
             {"format": "best", "clients": None, "cookiefile": None, "po": False, "impersonate": False},
         ]
@@ -394,7 +369,7 @@ class Downloader:
 
                 with yt_dlp.YoutubeDL(current_opts) as ydl:
                     ydl.download([url])
-                break  # Success
+                break
             except Exception as dl_err:
                 if attempt < len(attempts):
                     wait = 3 * attempt
@@ -405,42 +380,48 @@ class Downloader:
                     raise
 
         logger.info(f"Video downloaded: {video_path}")
-
-        # Extract audio as WAV for Whisper
         self._extract_audio(video_path, audio_path)
         logger.info(f"Audio extracted: {audio_path}")
 
         return video_path, audio_path
 
     def _extract_audio(self, video_path: str, audio_path: str):
-        """Extract 16kHz mono WAV audio for Whisper transcription."""
         import subprocess
         cmd = [
             "ffmpeg", "-y", "-i", video_path,
-            "-ar", "16000",       # 16kHz sample rate for Whisper
-            "-ac", "1",           # Mono
+            "-ar", "16000",
+            "-ac", "1",
             "-f", "wav",
             audio_path
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
+            logger.warning(f"Standard audio extraction failed, attempting silent audio fallback: {result.stderr}")
+            probe_cmd = [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", video_path
+            ]
+            probe_res = subprocess.run(probe_cmd, capture_output=True, text=True)
+            duration = float(probe_res.stdout.strip()) if probe_res.returncode == 0 and probe_res.stdout.strip() else 10.0
+            silent_cmd = [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
+                "-t", str(duration), "-f", "wav", audio_path
+            ]
+            silent_res = subprocess.run(silent_cmd, capture_output=True, text=True)
+            if silent_res.returncode != 0:
+                raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
 
     async def download_video_async(
         self,
         url: str,
         job_id: str,
         progress_callback: Optional[Callable] = None,
-        timeout: int = 360,  # 6-minute hard timeout
+        timeout: int = 360,
     ) -> tuple[str, str]:
-        """Async wrapper for download_video with a hard timeout to prevent infinite hangs."""
         loop = asyncio.get_running_loop()
         try:
             return await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: self.download_video(url, job_id, progress_callback)
-                ),
+                loop.run_in_executor(None, lambda: self.download_video(url, job_id, progress_callback)),
                 timeout=timeout
             )
         except asyncio.TimeoutError:
@@ -451,7 +432,6 @@ class Downloader:
             )
 
     async def get_video_info_async(self, url: str, timeout: int = 90) -> VideoInfo:
-        """Async wrapper for get_video_info with a 3-minute timeout."""
         loop = asyncio.get_running_loop()
         try:
             return await asyncio.wait_for(

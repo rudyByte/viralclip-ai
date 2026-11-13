@@ -396,7 +396,20 @@ class Downloader:
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
+            logger.warning(f"Standard audio extraction failed, attempting silent audio fallback: {result.stderr}")
+            probe_cmd = [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", video_path
+            ]
+            probe_res = subprocess.run(probe_cmd, capture_output=True, text=True)
+            duration = float(probe_res.stdout.strip()) if probe_res.returncode == 0 and probe_res.stdout.strip() else 10.0
+            silent_cmd = [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
+                "-t", str(duration), "-f", "wav", audio_path
+            ]
+            silent_res = subprocess.run(silent_cmd, capture_output=True, text=True)
+            if silent_res.returncode != 0:
+                raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
 
     async def download_video_async(
         self,

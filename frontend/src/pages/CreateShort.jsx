@@ -428,7 +428,7 @@ export default function CreateShort() {
             {submitting ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Queueing Clip Job...</span>
+                <span>{videoFile ? 'Uploading Video & Queueing...' : 'Queueing Clip Job...'}</span>
               </>
             ) : (
               <>

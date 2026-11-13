@@ -183,86 +183,109 @@ async def run_pipeline(
 
         cached_transcript = temp_dir / "transcript.json"
         viral_moments_path = temp_dir / "viral_moments.json"
+        is_uploaded = youtube_url.startswith("uploaded://")
+
         if not cached_transcript.exists() and not viral_moments_path.exists():
-            try:
-                await update_job_status(job_id, "transcribing", 10, "Fetching YouTube transcript...")
-                video_id = extract_video_id(youtube_url)
-                transcript = await get_youtube_transcript_async(video_id)
-                if transcript and transcript.segments:
-                    Transcriber.save_transcript(Transcriber(), transcript, str(cached_transcript))
-                    async with AsyncSessionLocal() as db:
-                        from sqlalchemy import update as sq_update
-                        await db.execute(
-                            sq_update(Job).where(Job.id == job_id).values(
-                                transcript_path=str(cached_transcript),
-                                transcript_source="youtube_api",
-                                youtube_video_id=video_id,
+            if not is_uploaded:
+                try:
+                    await update_job_status(job_id, "transcribing", 10, "Fetching YouTube transcript...")
+                    video_id = extract_video_id(youtube_url)
+                    transcript = await get_youtube_transcript_async(video_id)
+                    if transcript and transcript.segments:
+                        Transcriber.save_transcript(Transcriber(), transcript, str(cached_transcript))
+                        async with AsyncSessionLocal() as db:
+                            from sqlalchemy import update as sq_update
+                            await db.execute(
+                                sq_update(Job).where(Job.id == job_id).values(
+                                    transcript_path=str(cached_transcript),
+                                    transcript_source="youtube_api",
+                                    youtube_video_id=video_id,
+                                )
                             )
-                        )
-                        await db.commit()
+                            await db.commit()
 
-                    await update_job_status(job_id, "analyzing", 35, "Detecting viral moments from transcript...")
-                    analyzer = GroqAnalyzer(
-                        api_key=settings.groq_api_key,
-                        detection_model=settings.groq_detection_model,
-                        hook_model=settings.groq_hook_model,
-                    )
-                    viral_moments = await analyzer.detect_viral_moments(
-                        transcript_chunks=transcript.get_chunks_for_analysis(chunk_duration=180.0),
-                        num_clips=num_clips,
-                        min_duration=clip_min_duration,
-                        max_duration=clip_max_duration,
-                    )
-                    if not viral_moments:
-                        await update_job_status(
-                            job_id,
-                            "error",
-                            0,
-                            "",
-                            "No viral moments were detected in the YouTube transcript.",
+                        await update_job_status(job_id, "analyzing", 35, "Detecting viral moments from transcript...")
+                        analyzer = GroqAnalyzer(
+                            api_key=settings.groq_api_key,
+                            detection_model=settings.groq_detection_model,
+                            hook_model=settings.groq_hook_model,
                         )
-                        return
-                    with open(viral_moments_path, "w", encoding="utf-8") as f:
-                        json.dump([
-                            {
-                                "start_time": m.start_time,
-                                "end_time": m.end_time,
-                                "score": m.score,
-                                "reason": m.reason,
-                                "hook_words": m.hook_words,
-                                "scores": m.scores,
-                            }
-                            for m in viral_moments
-                        ], f, indent=2, ensure_ascii=False)
-                    await update_job_status(job_id, "downloading", 45, "Transcript analyzed. Downloading source video...")
-                    logger.info(f"[{job_id}] Transcript-first found {len(viral_moments)} moments.")
-            except Exception as transcript_exc:
-                logger.warning(f"[{job_id}] Transcript-first unavailable, using Whisper fallback: {transcript_exc}")
+                        viral_moments = await analyzer.detect_viral_moments(
+                            transcript_chunks=transcript.get_chunks_for_analysis(chunk_duration=180.0),
+                            num_clips=num_clips,
+                            min_duration=clip_min_duration,
+                            max_duration=clip_max_duration,
+                        )
+                        if not viral_moments:
+                            await update_job_status(
+                                job_id,
+                                "error",
+                                0,
+                                "",
+                                "No viral moments were detected in the YouTube transcript.",
+                            )
+                            return
+                        with open(viral_moments_path, "w", encoding="utf-8") as f:
+                            json.dump([
+                                {
+                                    "start_time": m.start_time,
+                                    "end_time": m.end_time,
+                                    "score": m.score,
+                                    "reason": m.reason,
+                                    "hook_words": m.hook_words,
+                                    "scores": m.scores,
+                                }
+                                for m in viral_moments
+                            ], f, indent=2, ensure_ascii=False)
+                        await update_job_status(job_id, "downloading", 45, "Transcript analyzed. Downloading source video...")
+                        logger.info(f"[{job_id}] Transcript-first found {len(viral_moments)} moments.")
+                except Exception as transcript_exc:
+                    logger.warning(f"[{job_id}] Transcript-first unavailable, using Whisper fallback: {transcript_exc}")
+            else:
+                logger.info(f"[{job_id}] Uploaded video — proceeding directly to local processing.")
 
-        # ── Step 1: Download ──────────────────────────────────────────
+        # ── Step 1: Download or Load Uploaded Video ───────────────────
         video_path = job.video_path if job else None
         audio_path = job.audio_path if job else None
 
-        # Check if files already exist on disk (for resuming interrupted downloads)
+        # Check if files already exist on disk (for resuming interrupted downloads or uploaded files)
         expected_video_path = temp_dir / f"{job_id}_video.mp4"
         expected_audio_path = temp_dir / f"{job_id}_audio.wav"
 
-        if expected_video_path.exists():
-            logger.info(f"[{job_id}] ✓ Video file already found on disk at {expected_video_path}. Skipping download.")
-            video_path = str(expected_video_path)
+        if expected_video_path.exists() or (video_path and os.path.exists(video_path)):
+            if not video_path or not os.path.exists(video_path):
+                video_path = str(expected_video_path)
+            logger.info(f"[{job_id}] ✓ Video file found on disk at {video_path}.")
             
-            if not expected_audio_path.exists():
-                logger.info(f"[{job_id}] Audio file missing. Extracting from existing video...")
-                await update_job_status(job_id, "downloading", 10, "Extracting audio from existing download...")
-                downloader = Downloader(str(temp_dir), resolution=resolution, cookies=cookies)
-                await asyncio.get_running_loop().run_in_executor(
-                    None, downloader._extract_audio, video_path, str(expected_audio_path)
-                )
-            
-            audio_path = str(expected_audio_path)
+            if not audio_path or not os.path.exists(audio_path):
+                if expected_audio_path.exists():
+                    audio_path = str(expected_audio_path)
+                else:
+                    logger.info(f"[{job_id}] Audio file missing. Extracting from video...")
+                    await update_job_status(job_id, "downloading", 10, "Extracting audio from video...")
+                    downloader = Downloader(str(temp_dir), resolution=resolution, cookies=cookies)
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, downloader._extract_audio, video_path, str(expected_audio_path)
+                    )
+                    audio_path = str(expected_audio_path)
             
             # Update video info in DB if missing
-            if not job or not job.title:
+            if is_uploaded:
+                transcriber = Transcriber()
+                dur = transcriber._probe_duration(video_path)
+                async with AsyncSessionLocal() as db:
+                    from sqlalchemy import update as sq_update
+                    await db.execute(
+                        sq_update(Job).where(Job.id == job_id).values(
+                            duration_seconds=dur if dur > 0 else (job.duration_seconds if job else None),
+                            video_path=video_path,
+                            audio_path=audio_path,
+                        )
+                    )
+                    await db.commit()
+                yt_title = (job.title if job and job.title else None) or "Uploaded Video"
+                yt_channel = (job.channel if job and job.channel else None) or "Local File"
+            elif not job or not job.title:
                 try:
                     downloader = Downloader(str(temp_dir), resolution=resolution, cookies=cookies)
                     info = await downloader.get_video_info_async(youtube_url)
@@ -284,6 +307,7 @@ async def run_pipeline(
                 except Exception as ex:
                     logger.warning(f"[{job_id}] Failed to fetch info for cached download: {ex}")
                     yt_title = "YouTube Video"
+                    yt_channel = "Unknown"
             else:
                 async with AsyncSessionLocal() as db:
                     from sqlalchemy import update as sq_update
@@ -296,7 +320,12 @@ async def run_pipeline(
                 yt_title = job.title or "YouTube Video"
                 yt_channel = job.channel or "Unknown"
             
-            await update_job_status(job_id, "downloading", 20, "Video and audio loaded from disk, resuming...")
+            await update_job_status(job_id, "downloading", 20, "Video and audio loaded, processing...")
+        elif is_uploaded:
+            err_msg = f"Uploaded video file not found on server at {expected_video_path}. Please re-upload."
+            logger.error(f"[{job_id}] {err_msg}")
+            await update_job_status(job_id, "error", 0, "", err_msg)
+            return
         elif video_path and audio_path and os.path.exists(video_path) and os.path.exists(audio_path):
             logger.info(f"[{job_id}] ✓ Step 1 checkpoint: video/audio already on disk, skipping download.")
             await update_job_status(job_id, "downloading", 20, "Video already downloaded, resuming...")

@@ -8,6 +8,15 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+api.interceptors.request.use((config) => {
+  if (config.data instanceof FormData) {
+    if (config.headers) {
+      delete config.headers['Content-Type']
+    }
+  }
+  return config
+})
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -28,7 +37,7 @@ export const processVideo = (data) =>
 export const uploadVideo = (formData) =>
   api.post('/video/upload', formData, {
     timeout: 0,
-    headers: { 'Content-Type': 'multipart/form-data' },
+    headers: { 'Content-Type': undefined },
   }).then((r) => r.data)
 
 export const getJobStatus = (jobId) =>
