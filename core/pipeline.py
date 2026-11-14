@@ -82,11 +82,39 @@ def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_d
         target_duration = max(min_duration, min(max_duration, 45))
         usable_duration = max(min(duration, max_duration), min_duration)
         clip_duration = min(target_duration, usable_duration)
+        
+        moments = []
+        # If visual motion analysis is available (e.g. non-verbal gameplay / highlights / montages), pick top visual action peaks
+        if visual_intervals:
+            for v in visual_intervals:
+                if len(moments) >= num_clips:
+                    break
+                v_start, v_end = v["start"], v["end"]
+                overlaps = any(min(v_end, m.end_time) > max(v_start, m.start_time) for m in moments)
+                if not overlaps and v_end <= duration:
+                    moments.append(ViralMoment(
+                        start_time=v_start,
+                        end_time=v_end,
+                        score=v["energy_score"],
+                        reason=f"Top visual gameplay action peak detected ({int(v_start)}s - {int(v_end)}s)",
+                        hook_words="Intense gameplay moment",
+                        scores={
+                            "curiosity_hook": 7,
+                            "emotional_intensity": 8,
+                            "controversy": 3,
+                            "storytelling": 5,
+                            "novelty": 7,
+                            "retention": 8,
+                            "audience_hook": 7,
+                            "educational_value": 3,
+                        },
+                    ))
+            if moments:
+                return moments[:num_clips]
+
         span = max(duration - clip_duration, 0)
-        # Maximum non-overlapping clips that fit in the video
         max_possible = max(1, int(duration // clip_duration))
         count = max(1, min(num_clips, max_possible))
-        moments = []
         for idx in range(count):
             start = 0.0 if count == 1 else (span * idx / max(count - 1, 1))
             end = min(duration, start + clip_duration)
@@ -95,18 +123,18 @@ def _fallback_viral_moments(transcript, num_clips: int, min_duration: int, max_d
             moments.append(ViralMoment(
                 start_time=start,
                 end_time=end,
-                score=45,
-                reason="No speech was detected; selected a clean visual segment by duration.",
-                hook_words="No speech detected",
+                score=50,
+                reason="Dynamic gameplay segment selected by motion duration.",
+                hook_words="Gameplay action clip",
                 scores={
-                    "curiosity_hook": 4,
-                    "emotional_intensity": 4,
-                    "controversy": 2,
-                    "storytelling": 3,
-                    "novelty": 4,
-                    "retention": 5,
-                    "audience_hook": 4,
-                    "educational_value": 2,
+                    "curiosity_hook": 5,
+                    "emotional_intensity": 6,
+                    "controversy": 3,
+                    "storytelling": 4,
+                    "novelty": 6,
+                    "retention": 6,
+                    "audience_hook": 6,
+                    "educational_value": 3,
                 },
             ))
         return moments
